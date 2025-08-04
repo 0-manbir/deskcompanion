@@ -45,6 +45,7 @@ const unsigned long eyeAnimInterval = 3000;
 #define CHARACTERISTIC_RX   "12e87612-7b69-4e34-a21b-d2303bfa2691"  // From Flutter to ESP32
 #define CHARACTERISTIC_TX   "2b50f752-b04e-4c9f-b188-aa7d5cf93dab"  // From ESP32 to Flutter
 NimBLECharacteristic* txChar;
+NimBLECharacteristic* rxChar;
 
 
 void setup() {
@@ -160,7 +161,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer) {
     Serial.println("Connected to app");
   }
-
   void onDisconnect(NimBLEServer* pServer) {
     Serial.println("Disconnected");
   }
@@ -172,9 +172,9 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
     Serial.print("Received from app: ");
     Serial.println(value.c_str());
 
-    // Example: if app sends "PING", reply with "PONG"
     if (value == "PING") {
       txChar->setValue("PONG");
+      delay(10);
       txChar->notify();
     }
   }
@@ -187,14 +187,12 @@ void setupNimBLE() {
 
   NimBLEService* service = server->createService(SERVICE_UUID);
 
-  // RX (App -> ESP32)
-  NimBLECharacteristic* rxChar = service->createCharacteristic(
+  rxChar = service->createCharacteristic(
     CHARACTERISTIC_RX,
     NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
   );
   rxChar->setCallbacks(new RxCallbacks());
 
-  // TX (ESP32 -> App)
   txChar = service->createCharacteristic(
     CHARACTERISTIC_TX,
     NIMBLE_PROPERTY::NOTIFY
