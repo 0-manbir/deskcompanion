@@ -1,14 +1,16 @@
 import 'dart:convert';
+import 'package:deskcompanionapp/pages/connect_page.dart';
+import 'package:deskcompanionapp/pages/notifications_page.dart';
+import 'package:deskcompanionapp/pages/tasks_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 void main() => runApp(MyApp());
 
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(title: 'BLE Demo', home: HomeScreen());
+    return MaterialApp(title: 'Desk Companion', home: HomeScreen());
   }
 }
 
@@ -18,93 +20,60 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final String serviceUUID = "fa974e39-7cab-4fa2-8681-1d71f9fb73bc";
-  final String rxUUID = "12e87612-7b69-4e34-a21b-d2303bfa2691"; // to ESP32
-  final String txUUID = "2b50f752-b04e-4c9f-b188-aa7d5cf93dab"; // from ESP32
+  int selectedIndex = 0;
 
-  BluetoothDevice? _device;
-  BluetoothCharacteristic? _rx;
-  BluetoothCharacteristic? _tx;
-  String _log = "";
+  final List<Widget> pages = const [
+    ConnectPage(),
+    NotificationsPage(),
+    TasksPage(),
+    SettingsPage(),
+  ];
 
-  @override
-  void initState() {
-    super.initState();
-    requestPermissions();
-  }
+  final List<String> titles = const [
+    "Dashboard",
+    "Notifications",
+    "Tasks",
+    "Settings",
+  ];
 
-  void requestPermissions() async {
-    await Permission.bluetooth.request();
-    await Permission.location.request();
-    scanAndConnect();
-  }
-
-  void scanAndConnect() async {
-    FlutterBluePlus.startScan(timeout: Duration(seconds: 5));
-    FlutterBluePlus.scanResults.listen((results) async {
-      for (ScanResult r in results) {
-        if (r.device.name == "ESP32") {
-          FlutterBluePlus.stopScan();
-          _device = r.device;
-          await _device!.connect();
-          discoverServices();
-          break;
-        }
-      }
-    });
-  }
-
-  void discoverServices() async {
-    if (_device == null) return;
-
-    List<BluetoothService> services = await _device!.discoverServices();
-    for (var s in services) {
-      if (s.uuid.toString() == serviceUUID) {
-        for (var c in s.characteristics) {
-          if (c.uuid.toString() == rxUUID) {
-            _rx = c;
-          } else if (c.uuid.toString() == txUUID) {
-            _tx = c;
-            await _tx!.setNotifyValue(true);
-            _tx!.lastValueStream.listen((value) {
-              setState(() {
-                _log += "\nESP32: ${utf8.decode(value)}";
-              });
-            });
-          }
-        }
-      }
-    }
-  }
-
-  void sendToESP32(String text) async {
-    if (_rx == null) {
-      print("rx is null");
-      return;
-    }
-    await _rx!.write(utf8.encode(text), withoutResponse: true);
+  void onItemTapped(int index) {
     setState(() {
-      _log += "\nApp: $text";
+      selectedIndex = index;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("ESP32 BLE")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            ElevatedButton(
-              onPressed: () => sendToESP32("PING"),
-              child: Text("Send PING"),
-            ),
-            SizedBox(height: 20),
-            Expanded(child: SingleChildScrollView(child: Text(_log))),
-          ],
-        ),
+      appBar: AppBar(title: Text(titles[selectedIndex])),
+      body: pages[selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: selectedIndex,
+        onTap: onItemTapped,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notifications),
+            label: 'Notify',
+          ),
+          BottomNavigationBarItem(icon: Icon(Icons.bluetooth), label: 'Tasks'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+        type: BottomNavigationBarType.fixed,
       ),
     );
+  }
+}
+
+// === Pages ===
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: Text("Settings Page"));
   }
 }
