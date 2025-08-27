@@ -40,6 +40,10 @@ dependencies:
   flutter_foreground_task: ^9.1.0
   shared_preferences: ^2.5.3
   audio_service: ^0.18.18
+  volume_controller: ^3.4.0
+  spotify_sdk: ^3.0.2
+  flutter_dotenv: ^6.0.0
+  logger: ^2.6.1
 
 dev_dependencies:
   flutter_test:

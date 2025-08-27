@@ -4,8 +4,13 @@ import 'package:deskcompanionapp/pages/notifications_page.dart';
 import 'package:deskcompanionapp/pages/tasks_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() => runApp(MyApp());
+void main() async {
+  runApp(MyApp());
+
+  await dotenv.load(fileName: ".env");
+}
 
 class MyApp extends StatelessWidget {
   @override
