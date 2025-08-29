@@ -2,14 +2,14 @@ import 'dart:convert';
 import 'package:deskcompanionapp/pages/connect_page.dart';
 import 'package:deskcompanionapp/pages/notifications_page.dart';
 import 'package:deskcompanionapp/pages/tasks_page.dart';
+import 'package:deskcompanionapp/pages/widgets/spotify_player_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
-  runApp(MyApp());
-
   await dotenv.load(fileName: ".env");
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -27,10 +27,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int selectedIndex = 0;
 
-  final List<Widget> pages = const [
+  final List<Widget> pages = [
     ConnectPage(),
     NotificationsPage(),
     TasksPage(),
+    SpotifyPlayerWidget(),
     SettingsPage(),
   ];
 
@@ -38,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
     "Dashboard",
     "Notifications",
     "Tasks",
+    "Music",
     "Settings",
   ];
 
@@ -62,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Notify',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.bluetooth), label: 'Tasks'),
+          BottomNavigationBarItem(icon: Icon(Icons.music_note), label: 'Music'),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
             label: 'Settings',

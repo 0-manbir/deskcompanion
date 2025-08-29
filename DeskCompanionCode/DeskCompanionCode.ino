@@ -6,13 +6,6 @@
 #include <DHT.h>
 #include <Adafruit_ADXL345_U.h>
 
-// OPEN MENU =====
-// if (currentState != MENU) {
-//   previousState = currentState;
-//   currentState = MENU;
-//   selectedFaceIndex = 0;
-// }
-
 // === Display ===
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
 static const int SCREEN_WIDTH = 128;
@@ -804,6 +797,9 @@ void handleEncoder1Rotation(int direction) {
     case NOTIFICATIONS:
       notificationScrollPos = constrain(notificationScrollPos + direction, 0, max(0, notificationCount - 5));
       break;
+    case EVENTS:
+      // change event-group
+      break;
     case TIMER:
       if (timerState == TIMER_SELECT) {
         selectedTimerType = (TimerType)constrain((int)selectedTimerType + direction, 0, 2);
@@ -815,8 +811,10 @@ void handleEncoder1Rotation(int direction) {
 void handleEncoder1Click() {
   switch (currentState) {
     case MUSIC:
-      // Change layout/style (placeholder)
-      sendBLECommand("MUSIC_LAYOUT");
+      // Start seek
+      break;
+    case NOTIFICATIONS:
+      // clear all notifications
       break;
     case TIMER:
       if (timerState == TIMER_RUNNING || timerState == TIMER_PAUSED) {
@@ -835,8 +833,17 @@ void handleEncoder1Click() {
 
 void handleEncoder1LongPress() {
   switch (currentState) {
+    case IDLE:
+      // change face type
+      break;
     case MUSIC:
-      // prev song
+      // change music layout
+      break;
+    case NOTIFICATIONS:
+      // change grid<->linear
+      break;
+    case EVENTS:
+      // change grid<->linear
       break;
   }
 }
@@ -847,6 +854,9 @@ void handleEncoder2Rotation(int direction) {
       // Volume control
       musicVolume = constrain(musicVolume + direction * 5, 0, 100);
       sendBLECommand("MUSIC_VOLUME:" + String(musicVolume));
+      break;
+    case EVENTS:
+      // traverse current group items
       break;
     case MENU:
       selectedFaceIndex = constrain(selectedFaceIndex + direction, 0, numFaces - 1);
@@ -870,6 +880,12 @@ void handleEncoder2Click() {
       // Select face
       currentState = faceStates[selectedFaceIndex];
       break;
+    case NOTIFICATIONS:
+      // clear selected notification
+      break;
+    case EVENTS:
+      // start selected event's timer
+      break;
     case TIMER:
       handleTimerClick();
       break;
@@ -877,10 +893,11 @@ void handleEncoder2Click() {
 }
 
 void handleEncoder2LongPress() {
-  switch (currentState) {
-    case MUSIC:
-      // next song
-      break;
+  // OPEN MENU =====
+  if (currentState != MENU) {
+    previousState = currentState;
+    currentState = MENU;
+    selectedFaceIndex = 0;
   }
 }
 
