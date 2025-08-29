@@ -1,10 +1,8 @@
-import 'dart:convert';
 import 'package:deskcompanionapp/pages/connect_page.dart';
+import 'package:deskcompanionapp/pages/music_controls.dart';
 import 'package:deskcompanionapp/pages/notifications_page.dart';
 import 'package:deskcompanionapp/pages/tasks_page.dart';
-import 'package:deskcompanionapp/pages/widgets/spotify_player_widget.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
@@ -31,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ConnectPage(),
     NotificationsPage(),
     TasksPage(),
-    SpotifyPlayerWidget(),
+    MusicControls(),
     SettingsPage(),
   ];
 
