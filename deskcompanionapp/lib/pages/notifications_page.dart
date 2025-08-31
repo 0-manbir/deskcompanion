@@ -1,149 +1,225 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-
-import 'package:notification_listener_service/notification_event.dart';
 import 'package:notification_listener_service/notification_listener_service.dart';
+import 'package:provider/provider.dart';
+import '../services/desk_companion_service.dart';
 
-class NotificationsPage extends StatefulWidget {
+class NotificationsPage extends StatelessWidget {
   const NotificationsPage({Key? key}) : super(key: key);
 
   @override
-  State<NotificationsPage> createState() => _NotificationsPageState();
-}
-
-class _NotificationsPageState extends State<NotificationsPage> {
-  StreamSubscription<ServiceNotificationEvent>? _subscription;
-  List<ServiceNotificationEvent> events = [];
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Plugin example app')),
-        body: Center(
-          child: Column(
-            children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: () async {
-                        final res =
-                            await NotificationListenerService.requestPermission();
-                        print("Is enabled: $res");
-                      },
-                      child: const Text("Request Permission"),
-                    ),
-                    const SizedBox(height: 20.0),
-                    TextButton(
-                      onPressed: () async {
-                        final bool res =
-                            await NotificationListenerService.isPermissionGranted();
-                        print("Is enabled: $res");
-                      },
-                      child: const Text("Check Permission"),
-                    ),
-                    const SizedBox(height: 20.0),
-                    TextButton(
-                      onPressed: () {
-                        print("Start Stream");
-                        _subscription = NotificationListenerService
-                            .notificationsStream
-                            .listen((event) {
-                              print("$event");
-                              if (context.mounted) {
-                                setState(() {
-                                  events.add(event);
-                                });
-                              }
-                            });
-                      },
-                      child: const Text("Start Stream"),
-                    ),
-                    const SizedBox(height: 20.0),
-                    TextButton(
-                      onPressed: () {
-                        print("Stop Stream");
-                        _subscription?.cancel();
-                      },
-                      child: const Text("Stop Stream"),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: events.length,
-                  itemBuilder: (_, index) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: ListTile(
-                        onTap: () async {
-                          try {
-                            await events[index].sendReply(
-                              "This is an auto response wowoow it worksss",
-                            );
-                          } catch (e) {
-                            print(e.toString());
-                          }
-                        },
-                        trailing:
-                            events[index].hasRemoved!
-                                ? const Text(
-                                  "Removed",
-                                  style: TextStyle(color: Colors.red),
-                                )
-                                : const SizedBox.shrink(),
-                        leading:
-                            events[index].appIcon == null
-                                ? const SizedBox.shrink()
-                                : Image.memory(
-                                  events[index].appIcon!,
-                                  width: 35.0,
-                                  height: 35.0,
-                                ),
-                        title: Text(events[index].title ?? "No title"),
-                        subtitle: Column(
+    return Consumer<DeskCompanionService>(
+      builder: (context, service, child) {
+        return Column(
+          children: [
+            // Header with controls
+            Container(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.notifications, size: 24),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              events[index].content ?? "no content",
-                              style: const TextStyle(
+                              "Notifications",
+                              style: TextStyle(
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 8.0),
-                            events[index].canReply!
-                                ? const Text(
-                                  "Replied with: This is an auto reply",
-                                  style: TextStyle(color: Colors.purple),
-                                )
-                                : const SizedBox.shrink(),
-                            events[index].largeIcon != null
-                                ? Image.memory(events[index].largeIcon!)
-                                : const SizedBox.shrink(),
+                            Text(
+                              "${service.recentNotifications.length} notifications received",
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
                           ],
                         ),
-                        isThreeLine: true,
                       ),
-                    );
-                  },
-                ),
+                      Row(
+                        children: [
+                          Icon(
+                            service.isConnected
+                                ? Icons.bluetooth_connected
+                                : Icons.bluetooth_disabled,
+                            color:
+                                service.isConnected ? Colors.green : Colors.red,
+                            size: 20,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            service.isConnected ? "Synced" : "No sync",
+                            style: TextStyle(
+                              color:
+                                  service.isConnected
+                                      ? Colors.green
+                                      : Colors.red,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+
+                  // Permission check
+                  FutureBuilder<bool>(
+                    future: NotificationListenerService.isPermissionGranted(),
+                    builder: (context, snapshot) {
+                      if (snapshot.data != true) {
+                        return Card(
+                          color: Colors.orange.shade50,
+                          child: ListTile(
+                            leading: Icon(Icons.warning, color: Colors.orange),
+                            title: Text("Permission Required"),
+                            subtitle: Text(
+                              "Grant notification access to sync notifications",
+                            ),
+                            trailing: ElevatedButton(
+                              onPressed: () async {
+                                await NotificationListenerService.requestPermission();
+                              },
+                              child: Text("Grant"),
+                            ),
+                          ),
+                        );
+                      }
+                      return SizedBox.shrink();
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ),
+            ),
+
+            // Notifications List
+            Expanded(
+              child:
+                  service.recentNotifications.isEmpty
+                      ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.notifications_off,
+                              size: 64,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 16),
+                            Text(
+                              "No notifications yet",
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              "Make sure notification access is granted",
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      )
+                      : ListView.builder(
+                        itemCount: service.recentNotifications.length,
+                        itemBuilder: (context, index) {
+                          final notification =
+                              service.recentNotifications[index];
+                          return Card(
+                            margin: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 4,
+                            ),
+                            child: ListTile(
+                              leading:
+                                  notification.appIcon != null
+                                      ? ClipOval(
+                                        child: Image.memory(
+                                          notification.appIcon!,
+                                          width: 40,
+                                          height: 40,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      )
+                                      : CircleAvatar(
+                                        backgroundColor: Colors.grey.shade200,
+                                        child: Icon(Icons.notifications),
+                                      ),
+                              title: Text(
+                                notification.title ?? "No title",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (notification.content?.isNotEmpty == true)
+                                    Text(
+                                      notification.content!,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    // _formatTimestamp(notification.createTime),
+                                    // TODO create time is not defined
+                                    "21m ago",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              isThreeLine: true,
+                              trailing:
+                                  notification.hasRemoved == true
+                                      ? Icon(
+                                        Icons.clear,
+                                        color: Colors.red,
+                                        size: 16,
+                                      )
+                                      : service.isConnected
+                                      ? Icon(
+                                        Icons.sync,
+                                        color: Colors.green,
+                                        size: 16,
+                                      )
+                                      : Icon(
+                                        Icons.sync_disabled,
+                                        color: Colors.grey,
+                                        size: 16,
+                                      ),
+                            ),
+                          );
+                        },
+                      ),
+            ),
+          ],
+        );
+      },
     );
+  }
+
+  String _formatTimestamp(int? timestamp) {
+    if (timestamp == null) return "Unknown time";
+
+    final now = DateTime.now();
+    final notificationTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final difference = now.difference(notificationTime);
+
+    if (difference.inMinutes < 1) {
+      return "Just now";
+    } else if (difference.inMinutes < 60) {
+      return "${difference.inMinutes}m ago";
+    } else if (difference.inHours < 24) {
+      return "${difference.inHours}h ago";
+    } else {
+      return "${difference.inDays}d ago";
+    }
   }
 }

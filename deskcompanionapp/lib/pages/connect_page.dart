@@ -1,122 +1,202 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
+import '../services/desk_companion_service.dart';
 
-class ConnectPage extends StatefulWidget {
+class ConnectPage extends StatelessWidget {
   const ConnectPage({super.key});
 
   @override
-  State<ConnectPage> createState() => _ConnectPageState();
+  Widget build(BuildContext context) {
+    return Consumer<DeskCompanionService>(
+      builder: (context, service, child) {
+        return Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // Connection Status Card
+                Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        Icon(
+                          service.isConnected
+                              ? Icons.bluetooth_connected
+                              : service.isScanning
+                              ? Icons.bluetooth_searching
+                              : Icons.bluetooth_disabled,
+                          size: 64,
+                          color:
+                              service.isConnected
+                                  ? Colors.green
+                                  : service.isScanning
+                                  ? Colors.blue
+                                  : Colors.red,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          service.isConnected
+                              ? "Connected to Desk Companion"
+                              : service.isScanning
+                              ? "Searching for Desk Companion..."
+                              : "Disconnected",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          service.isConnected
+                              ? "Your desk companion is connected and syncing"
+                              : service.isScanning
+                              ? "Make sure your ESP32 is powered on"
+                              : "Connection will retry automatically",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        SizedBox(height: 20),
+
+                        // Action Buttons
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed:
+                                  service.isScanning
+                                      ? null
+                                      : service.forceReconnect,
+                              icon: Icon(Icons.refresh),
+                              label: Text(
+                                service.isScanning
+                                    ? "Scanning..."
+                                    : "Reconnect",
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                service.sendToESP32("PING");
+                              },
+                              icon: Icon(Icons.send),
+                              label: Text("Test"),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                SizedBox(height: 20),
+
+                // Manual Send Section
+                Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Manual Commands",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            _CommandChip(
+                              "PING",
+                              () => service.sendToESP32("PING"),
+                            ),
+                            _CommandChip("TIME SYNC", () async {
+                              DateTime now = DateTime.now();
+                              String timeString =
+                                  "TIME:${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}";
+                              service.sendToESP32(timeString);
+                            }),
+                            _CommandChip(
+                              "TEST MUSIC",
+                              () => service.sendToESP32(
+                                "MUSIC:Test Song|Test Artist|true|75",
+                              ),
+                            ),
+                            _CommandChip(
+                              "TEST NOTIFICATION",
+                              () => service.sendToESP32(
+                                "NOTIFICATION:TestApp|Test Title|This is a test notification",
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                SizedBox(height: 20),
+
+                // Connection Log
+                Expanded(
+                  child: Card(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Text(
+                                "Connection Log",
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              Spacer(),
+                              TextButton(
+                                onPressed: service.clearLog,
+                                child: Text("Clear"),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Container(
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: SingleChildScrollView(
+                              child: Text(
+                                service.connectionLog.isEmpty
+                                    ? "No log entries yet..."
+                                    : service.connectionLog,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
-class _ConnectPageState extends State<ConnectPage> {
-  final String serviceUUID = "fa974e39-7cab-4fa2-8681-1d71f9fb73bc";
+class _CommandChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
 
-  final String rxUUID = "12e87612-7b69-4e34-a21b-d2303bfa2691";
-  // to ESP32
-  final String txUUID = "2b50f752-b04e-4c9f-b188-aa7d5cf93dab";
-  // from ESP32
-  BluetoothDevice? _device;
-
-  BluetoothCharacteristic? _rx;
-
-  BluetoothCharacteristic? _tx;
-
-  String _log = "";
-
-  @override
-  void initState() {
-    super.initState();
-    requestPermissions();
-  }
-
-  void requestPermissions() async {
-    await Permission.bluetooth.request();
-    await Permission.location.request();
-    scanAndConnect();
-  }
-
-  void scanAndConnect() async {
-    FlutterBluePlus.startScan(timeout: Duration(seconds: 5));
-    FlutterBluePlus.scanResults.listen((results) async {
-      for (ScanResult r in results) {
-        if (r.advertisementData.serviceUuids.toString().contains(serviceUUID)) {
-          FlutterBluePlus.stopScan();
-          _device = r.device;
-          await _device!.connect();
-          await _device!.discoverServices();
-          discoverServices();
-          break;
-        }
-      }
-    });
-  }
-
-  void discoverServices() async {
-    if (_device == null) return;
-
-    List<BluetoothService> services = await _device!.discoverServices();
-    for (var s in services) {
-      if (s.uuid.toString() == serviceUUID) {
-        for (var c in s.characteristics) {
-          if (c.uuid.toString() == rxUUID) {
-            _rx = c;
-          } else if (c.uuid.toString() == txUUID) {
-            _tx = c;
-            await _tx!.setNotifyValue(true);
-            _tx!.lastValueStream.listen((value) {
-              if (context.mounted) {
-                setState(() {
-                  _log += "\nESP32: ${utf8.decode(value)}";
-                });
-              }
-            });
-          }
-        }
-      }
-    }
-  }
-
-  void sendToESP32(String text) async {
-    if (_rx == null) {
-      print("rx is null");
-      return;
-    }
-    await _rx!.write(utf8.encode(text), withoutResponse: true);
-    if (context.mounted) {
-      setState(() {
-        _log += "\nApp: $text";
-      });
-    }
-  }
+  const _CommandChip(this.label, this.onTap);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text("ESP32 BLE")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            ElevatedButton(
-              onPressed: () => sendToESP32("PING"),
-              child: Text("Send PING"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _log = "";
-                });
-              },
-              child: Text("Clear Log"),
-            ),
-            SizedBox(height: 20),
-            Expanded(child: SingleChildScrollView(child: Text(_log))),
-          ],
-        ),
-      ),
-    );
+    return ActionChip(label: Text(label), onPressed: onTap);
   }
 }

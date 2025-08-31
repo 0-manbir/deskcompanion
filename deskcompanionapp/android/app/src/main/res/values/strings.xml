@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Desk Companion</string>
+    <string name="notification_channel_name">Desk Companion Background</string>
+    <string name="notification_channel_description">Keeps your desk companion synced</string>
+</resources>

@@ -1,177 +1,275 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:spotify_sdk/models/player_state.dart';
-import 'package:spotify_sdk/models/track.dart';
-import 'package:spotify_sdk/spotify_sdk.dart';
+import 'package:provider/provider.dart';
+import '../services/desk_companion_service.dart';
 
-/// A [StatefulWidget] which uses:
-/// * [spotify_sdk](https://pub.dev/packages/spotify_sdk)
-/// to connect to Spotify and use controls.
-///
-/// CONTROLS:
-/// pause
-/// resume
-/// seekTo (mili)
-/// seekToRelative (skip milis)
-/// skipToNext
-/// skipToPrev
-/// volume
-
-class MusicControls extends StatefulWidget {
+class MusicControls extends StatelessWidget {
   const MusicControls({super.key});
 
   @override
-  State<MusicControls> createState() => _MusicControlsState();
-}
+  Widget build(BuildContext context) {
+    return Consumer<DeskCompanionService>(
+      builder: (context, service, child) {
+        final playerState = service.currentPlayerState;
+        final track = playerState?.track;
 
-class _MusicControlsState extends State<MusicControls> {
-  PlayerState? _playerState;
-  StreamSubscription<PlayerState>? _playerStateSubscription;
+        return Scaffold(
+          body: Column(
+            children: [
+              // Album Art and Song Info
+              Expanded(
+                flex: 2,
+                child: Container(
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Album Art
+                      Container(
+                        width: 250,
+                        height: 250,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 20,
+                              offset: Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child:
+                            track?.imageUri.raw.isNotEmpty == true
+                                ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Image.network(
+                                    "https://i.scdn.co/image/${track!.imageUri.raw.split(':').last}",
+                                    fit: BoxFit.cover,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            _buildPlaceholderArt(),
+                                  ),
+                                )
+                                : _buildPlaceholderArt(),
+                      ),
 
-  Future<void> connectToSpotifyRemote() async {
-    try {
-      var result = await SpotifySdk.connectToSpotifyRemote(
-        clientId: dotenv.env['CLIENT_ID'].toString(),
-        redirectUrl: dotenv.env['REDIRECT_URL'].toString(),
-      );
-      print("Connected: $result");
+                      SizedBox(height: 30),
 
-      // Subscribe after connection
-      _subscribeToPlayerState();
-    } catch (e) {
-      print("Connect error: $e");
-    }
-  }
+                      // Song Title
+                      Text(
+                        track?.name ?? "No song playing",
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
 
-  void _subscribeToPlayerState() {
-    _playerStateSubscription?.cancel();
-    _playerStateSubscription = SpotifySdk.subscribePlayerState().listen(
-      (playerState) {
-        setState(() {
-          _playerState = playerState;
-        });
-      },
-      onError: (err) {
-        print("PlayerState error: $err");
+                      SizedBox(height: 8),
+
+                      // Artist Name
+                      Text(
+                        track?.artist.name ?? "Connect to Spotify",
+                        style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Progress Bar (placeholder - Spotify SDK doesn't always provide progress)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 4,
+                        thumbShape: RoundSliderThumbShape(
+                          enabledThumbRadius: 8,
+                        ),
+                      ),
+                      child: Slider(
+                        value: 0.3, // Placeholder value
+                        onChanged: (value) {
+                          // TODO: Implement seek functionality
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "1:23",
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                          Text(
+                            "3:45",
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: 20),
+
+              // Control Buttons
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _ControlButton(
+                      icon: Icons.skip_previous,
+                      onPressed: () => service.skipPrevious(),
+                      size: 32,
+                    ),
+                    _ControlButton(
+                      icon:
+                          playerState?.isPaused == false
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                      onPressed: () => service.playPause(),
+                      size: 64,
+                      isPrimary: true,
+                    ),
+                    _ControlButton(
+                      icon: Icons.skip_next,
+                      onPressed: () => service.skipNext(),
+                      size: 32,
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: 30),
+
+              // Additional Controls
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _ControlButton(
+                      icon: Icons.shuffle,
+                      onPressed: () {
+                        // TODO: Toggle shuffle
+                      },
+                      size: 24,
+                    ),
+                    _ControlButton(
+                      icon: Icons.favorite_border,
+                      onPressed: () {
+                        // TODO: Like/unlike song
+                      },
+                      size: 24,
+                    ),
+                    _ControlButton(
+                      icon: Icons.repeat,
+                      onPressed: () {
+                        // TODO: Toggle repeat
+                      },
+                      size: 24,
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(height: 20),
+
+              // Connection Status
+              Container(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      service.isConnected
+                          ? Icons.bluetooth_connected
+                          : Icons.bluetooth_disabled,
+                      size: 16,
+                      color: service.isConnected ? Colors.green : Colors.red,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      service.isConnected
+                          ? "Synced to Desk Companion"
+                          : "Not connected",
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
       },
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _initSpotify();
+  Widget _buildPlaceholderArt() {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.purple.shade300, Colors.blue.shade300],
+        ),
+      ),
+      child: Center(
+        child: Icon(Icons.music_note, size: 80, color: Colors.white),
+      ),
+    );
   }
+}
 
-  Future<void> _initSpotify() async {
-    try {
-      // Step 1: Authenticate
-      var authenticationToken = await SpotifySdk.getAccessToken(
-        clientId: dotenv.env['CLIENT_ID'].toString(),
-        redirectUrl: dotenv.env['REDIRECT_URL'].toString(),
-        scope:
-            "app-remote-control,user-modify-playback-state,user-read-playback-state,user-read-currently-playing",
-      );
+class _ControlButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onPressed;
+  final double size;
+  final bool isPrimary;
 
-      print("Auth token: $authenticationToken");
-
-      // Step 2: Connect only AFTER successful authentication
-      var result = await SpotifySdk.connectToSpotifyRemote(
-        clientId: dotenv.env['CLIENT_ID'].toString(),
-        redirectUrl: dotenv.env['REDIRECT_URL'].toString(),
-      );
-
-      print("Connected: $result");
-
-      // Step 3: Subscribe
-      _subscribeToPlayerState();
-    } catch (e) {
-      print("Init error: $e");
-    }
-  }
-
-  @override
-  void dispose() {
-    _playerStateSubscription?.cancel();
-    super.dispose();
-  }
+  const _ControlButton({
+    required this.icon,
+    required this.onPressed,
+    this.size = 32,
+    this.isPrimary = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    Track? track = _playerState?.track;
-    return Scaffold(
-      appBar: AppBar(title: const Text("Now Playing")),
-      body: Column(
-        children: [
-          Center(
-            child:
-                track == null
-                    ? const Text("No track playing")
-                    : Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (track.imageUri.raw.isNotEmpty)
-                          Image.network(
-                            "https://i.scdn.co/image/${track.imageUri.raw.split(':').last}",
-                            width: 200,
-                          ),
-                        Text(track.name, style: const TextStyle(fontSize: 20)),
-                        Text(
-                          track.artist.name!,
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                      ],
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: EdgeInsets.all(isPrimary ? 16 : 12),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color:
+              isPrimary ? Theme.of(context).primaryColor : Colors.grey.shade200,
+          boxShadow:
+              isPrimary
+                  ? [
+                    BoxShadow(
+                      color: Theme.of(context).primaryColor.withOpacity(0.3),
+                      blurRadius: 15,
+                      offset: Offset(0, 5),
                     ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (_playerState?.isPaused == true) {
-                SpotifySdk.resume();
-              } else {
-                SpotifySdk.pause();
-              }
-            },
-            child: const Text("Pause/Resume"),
-          ),
-          Row(
-            children: [
-              ElevatedButton(
-                onPressed: () {
-                  SpotifySdk.skipPrevious();
-                },
-                child: Text("Prev"),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  SpotifySdk.skipNext();
-                },
-                child: Text("Next"),
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              ElevatedButton(
-                onPressed: () {
-                  SpotifySdk.seekToRelativePosition(
-                    relativeMilliseconds: -10000,
-                  );
-                },
-                child: Text("Prev 10s"),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  SpotifySdk.seekToRelativePosition(
-                    relativeMilliseconds: 10000,
-                  );
-                },
-                child: Text("Next 10s"),
-              ),
-            ],
-          ),
-        ],
+                  ]
+                  : null,
+        ),
+        child: Icon(
+          icon,
+          size: size,
+          color: isPrimary ? Colors.white : Colors.grey.shade700,
+        ),
       ),
     );
   }

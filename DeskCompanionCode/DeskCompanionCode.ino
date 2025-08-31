@@ -1190,15 +1190,14 @@ void setupNimBLE() {
         NIMBLE_PROPERTY::NOTIFY
     );
     
-    // Start service
     pService->start();
-    
-    // Start server
     pServer->start();
     
     // Advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setName("DeskCompanion");
+    pAdvertising->enableScanResponse(true);
     pAdvertising->start();
     
     Serial.println("🚀 BLE server ready - 'DeskCompanion'");
