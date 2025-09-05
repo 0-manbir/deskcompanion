@@ -1,6 +1,7 @@
 // lib/services/desk_companion_service.dart
 import 'dart:async';
 import 'dart:convert';
+import 'package:deskcompanionapp/pages/music_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -9,6 +10,7 @@ import 'package:notification_listener_service/notification_listener_service.dart
 import 'package:spotify_sdk/models/player_state.dart';
 import 'package:spotify_sdk/spotify_sdk.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:volume_controller/volume_controller.dart';
 
 class DeskCompanionService extends ChangeNotifier {
   static final DeskCompanionService _instance =
@@ -216,15 +218,38 @@ class DeskCompanionService extends ChangeNotifier {
     }
   }
 
+  DateTime _lastSkipTime = DateTime.now();
+  final Duration _skipCooldown = Duration(milliseconds: 600);
+
   void _handleIncomingData(String data) {
     _log("📩 Received: $data");
 
-    // Handle different types of incoming data
     if (data.startsWith("STATUS:")) {
       // Handle status updates from ESP32
+    } else if (data.startsWith("MUSIC")) {
+      if (data.startsWith("MUSIC_VOLUME")) {
+        VolumeController.instance.setVolume(
+          double.parse(data.split(":")[1]) / 100.0,
+        );
+      } else if (data == "MUSIC_PLAY" || data == "MUSIC_PAUSE") {
+        playPause();
+      } else if (data == "MUSIC_NEXT") {
+        _safeSkip(skipNext);
+      } else if (data == "MUSIC_PREV") {
+        _safeSkip(skipPrevious);
+      }
     } else if (data.contains("Hello from ESP32")) {
-      // Respond to ping
       sendToESP32("PONG");
+    }
+  }
+
+  void _safeSkip(Function action) {
+    final now = DateTime.now();
+    if (now.difference(_lastSkipTime) > _skipCooldown) {
+      action();
+      _lastSkipTime = now;
+    } else {
+      _log("⏱ Skip ignored (cooldown active)");
     }
   }
 
@@ -271,9 +296,7 @@ class DeskCompanionService extends ChangeNotifier {
     String songName = playerState.track?.name ?? "Unknown";
     String artistName = playerState.track?.artist.name ?? "Unknown";
     bool isPlaying = !playerState.isPaused;
-
-    // Get volume (Note: Spotify SDK doesn't always provide volume)
-    int volume = 50; // Default volume
+    int volume = (await VolumeController.instance.getVolume() * 100).toInt();
 
     String musicData = "MUSIC:$songName|$artistName|$isPlaying|$volume";
     await sendToESP32(musicData);

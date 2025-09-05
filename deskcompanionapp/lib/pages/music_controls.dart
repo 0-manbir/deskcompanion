@@ -18,15 +18,15 @@ class MusicControls extends StatelessWidget {
               // Album Art and Song Info
               Expanded(
                 flex: 2,
-                child: Container(
+                child: SizedBox(
                   width: double.infinity,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       // Album Art
                       Container(
-                        width: 250,
-                        height: 250,
+                        width: 200,
+                        height: 200,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
@@ -52,7 +52,7 @@ class MusicControls extends StatelessWidget {
                                 : _buildPlaceholderArt(),
                       ),
 
-                      SizedBox(height: 30),
+                      SizedBox(height: 20),
 
                       // Song Title
                       Text(
@@ -66,7 +66,7 @@ class MusicControls extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
 
-                      SizedBox(height: 8),
+                      SizedBox(height: 4),
 
                       // Artist Name
                       Text(
@@ -86,7 +86,7 @@ class MusicControls extends StatelessWidget {
                   children: [
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        trackHeight: 4,
+                        trackHeight: 3,
                         thumbShape: RoundSliderThumbShape(
                           enabledThumbRadius: 8,
                         ),
@@ -149,7 +149,7 @@ class MusicControls extends StatelessWidget {
                 ),
               ),
 
-              SizedBox(height: 30),
+              SizedBox(height: 10),
 
               // Additional Controls
               Padding(
