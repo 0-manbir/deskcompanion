@@ -421,6 +421,7 @@ void readSensors() {
       // triggerStatusOverlay();
     } else if (magnitude < 12.0) {
       shakeDetected = false;
+      // shakeDetected = false;
     }
 
     lastAccelRead = millis();
@@ -537,19 +538,25 @@ void displayClockFace() {
 
 void displayMusicFace() {
   u8g2.clearBuffer();
+
+  // === LEFT SIDE: Album art ===
+  u8g2.drawXBMP(0, 0, IMG_WIDTH, IMG_HEIGHT, albumArtBuffer);
+
+  // === RIGHT SIDE: Song Info ===
   u8g2.setFont(u8g2_font_6x10_tf);
 
-  // Song info
-  u8g2.drawStr(5, 15, currentSong.substring(0, 20).c_str());
-  u8g2.drawStr(5, 30, currentArtist.substring(0, 20).c_str());
+  // Song (line 1)
+  u8g2.drawStr(68, 12, currentSong.substring(0, 10).c_str());
 
-  // Play/pause indicator
-  u8g2.drawStr(5, 45, musicPlaying ? "Playing" : "Paused");
+  // Artist (line 2)
+  u8g2.drawStr(68, 24, currentArtist.substring(0, 10).c_str());
 
-  // Volume bar
-  int volumeWidth = map(musicVolume, 0, 100, 0, 118);
-  u8g2.drawFrame(5, 50, 118, 8);
-  u8g2.drawBox(5, 50, volumeWidth, 8);
+  // Play/pause state (line 3)
+  u8g2.drawStr(68, 36, musicPlaying ? "▶ Playing" : "⏸ Paused");
+
+  // Volume bar (bottom)
+  int volumeWidth = map(musicVolume, 0, 100, 0, 54); // max width ~54 px
+  u8g2.drawFrame(68, 50, 54, 8);
 
   u8g2.sendBuffer();
 }
@@ -871,6 +878,11 @@ void handleEncoder2Rotation(int direction) {
       // traverse current group items
       break;
     case MENU:
+      if (selectedFaceIndex + direction <= 0)
+        selectedFaceIndex = numFaces - 1;
+      if (selectedFaceIndex + direction >= numFaces)
+        selectedFaceIndex = 0;
+      
       selectedFaceIndex = constrain(selectedFaceIndex + direction, 0, numFaces - 1);
       break;
     case TIMER:
@@ -1113,7 +1125,9 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
         String content = payload.substring(secondPipe + 1);
         addNotification(app, title, content);
       }
-    } else if (data.startsWith("MUSIC:")) {
+    }
+    
+    if (data.startsWith("MUSIC:")) {
       // Format: MUSIC:song|artist|playing|volume
       String payload = data.substring(6);
       int firstPipe = payload.indexOf('|');
@@ -1126,10 +1140,14 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
         musicPlaying = payload.substring(secondPipe + 1, thirdPipe) == "true";
         musicVolume = payload.substring(thirdPipe + 1).toInt();
       }
-    } else if (data.startsWith("TIME:")) {
+    } 
+    
+    if (data.startsWith("TIME:")) {
       // Handle time sync if needed
       // Format: TIME:HH:MM:SS
-    } else if (data.startsWith("EVENTS:")) {
+    }
+    
+    if (data.startsWith("EVENTS:")) {
       // Handle events/todos
       // Format: EVENTS:event1|event2|event3...
     }
