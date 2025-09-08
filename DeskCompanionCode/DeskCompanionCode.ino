@@ -5,6 +5,7 @@
 #include <NimBLEDevice.h>
 #include <DHT.h>
 #include <Adafruit_ADXL345_U.h>
+#include <rotating_music_note_16_frames.h>
 
 // === Display ===
 U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -21,7 +22,8 @@ enum AppState {
   EVENTS,
   MENU,
   STATUS_OVERLAY,
-  NOTIFICATION_POPUP
+  NOTIFICATION_POPUP,
+  SLEEP
 };
 AppState currentState = IDLE;
 AppState previousState = IDLE;
@@ -42,6 +44,13 @@ enum TimerType {
   POMODORO
 };
 TimerType selectedTimerType = STOPWATCH;
+
+// === Music Display ===
+enum MusicSubstate {
+  SEEK,
+  VOLUME
+};
+MusicSubstate selectedMusicSubstate = SEEK;
 
 // === Encoder Pins ===
 #define ENCODER1_A 33
@@ -111,10 +120,10 @@ bool showNotificationPopup = false;
 String currentNotification = "";
 
 // === Menu System ===
-const String faceNames[] = { "IDLE", "CLOCK", "MUSIC", "NOTIFS", "TIMER", "EVENTS" };
-const AppState faceStates[] = { IDLE, CLOCK, MUSIC, NOTIFICATIONS, TIMER, EVENTS };
-const int numFaces = 6;
-int selectedFaceIndex = 0;
+const String faceNames[] = { "IDLE", "CLOCK", "MUSIC", "NOTIFS", "TIMER", "EVENTS", "SLEEP" };
+const AppState faceStates[] = { IDLE, CLOCK, MUSIC, NOTIFICATIONS, TIMER, EVENTS, SLEEP };
+const int numFaces = 7;
+int menuSelectionIndex = 0;
 
 // === Timer Variables ===
 unsigned long timerStartTime = 0;
@@ -126,9 +135,12 @@ int timerMinutes = 5;  // Default timer setting
 
 // === Music Info ===
 String currentSong = "No Music";
+String currentAlbum = "";
 String currentArtist = "";
 bool musicPlaying = false;
 int musicVolume = 50;
+int songDuration = 1000; // in ms
+int playbackPosition = 0;
 
 // === Sensor Data ===
 float temperature = 0;
@@ -169,8 +181,14 @@ public:
   EyeState left, right;
   int spacing;
 
+  float defaultW, defaultH;
+  int defaultCorner;
+
   EyeManager(int eyeW, int eyeH, int spacing, int corner) {
     this->spacing = spacing;
+    this->defaultW = eyeW;
+    this->defaultH = eyeH;
+    this->defaultCorner = corner;
     left = { SCREEN_WIDTH / 2.0f - eyeW / 2.0f - spacing / 2.0f, SCREEN_HEIGHT / 2.0f, (float)eyeW, (float)eyeH, corner };
     right = { SCREEN_WIDTH / 2.0f + eyeW / 2.0f + spacing / 2.0f, SCREEN_HEIGHT / 2.0f, (float)eyeW, (float)eyeH, corner };
   }
@@ -199,9 +217,9 @@ public:
   }
 
   void reset() {
-    left.w = right.w = 40;
-    left.h = right.h = 40;
-    left.corner = right.corner = 10;
+    left.w = right.w = defaultW;
+    left.h = right.h = defaultH;
+    left.corner = right.corner = defaultCorner;
     left.x = SCREEN_WIDTH / 2.0f - left.w / 2.0f - spacing / 2.0f;
     right.x = SCREEN_WIDTH / 2.0f + right.w / 2.0f + spacing / 2.0f;
     left.y = right.y = SCREEN_HEIGHT / 2.0f;
@@ -252,9 +270,9 @@ public:
 
   void wakeup() {
     reset();
-    for (int h = 2; h <= 40; h += 4) {
+    for (int h = 2; h <= defaultH; h += 4) {
       left.h = right.h = h;
-      left.corner = right.corner = min(h, 10);
+      left.corner = right.corner = min(h, defaultCorner);
       draw();
       delay(15);
     }
@@ -298,8 +316,7 @@ private:
   }
 };
 
-// EyeManager eyes(55, 55, 12, 12);
-EyeManager eyes(40, 40, 10, 10);
+EyeManager eyes(48, 48, 12, 12);
 
 void setup() {
   Serial.begin(115200);
@@ -350,6 +367,7 @@ void loop() {
   handleSleepMode();
   handleOverlays();
   handleState();
+  updateSeek(); // listen for seek input
 
   if (deviceConnected) {
     static unsigned long lastSent = 0;
@@ -504,6 +522,9 @@ void handleState() {
     case NOTIFICATION_POPUP:
       displayNotificationPopup();
       break;
+    case SLEEP:
+      // TODO go to sleep, turn off all sensors
+      break;
   }
 }
 
@@ -536,29 +557,134 @@ void displayClockFace() {
   u8g2.sendBuffer();
 }
 
+// tiny volume icons (8×8)
+static void drawMuteIcon(int x, int y) { // speaker + X
+  // speaker box
+  u8g2.drawLine(x+0, y+3, x+3, y+3);
+  u8g2.drawLine(x+0, y+4, x+3, y+4);
+  u8g2.drawLine(x+3, y+2, x+5, y+2);
+  u8g2.drawLine(x+3, y+5, x+5, y+5);
+  u8g2.drawLine(x+5, y+2, x+5, y+5);
+  // X
+  u8g2.drawLine(x+6, y+1, x+11, y+6);
+  u8g2.drawLine(x+11, y+1, x+6, y+6);
+}
+static void drawMaxIcon(int x, int y) { // speaker + waves
+  // speaker
+  u8g2.drawLine(x+0, y+3, x+3, y+3);
+  u8g2.drawLine(x+0, y+4, x+3, y+4);
+  u8g2.drawLine(x+3, y+2, x+5, y+2);
+  u8g2.drawLine(x+3, y+5, x+5, y+5);
+  u8g2.drawLine(x+5, y+2, x+5, y+5);
+  // waves
+  u8g2.drawLine(x+7, y+2, x+9, y+4);
+  u8g2.drawLine(x+9, y+4, x+7, y+6);
+  u8g2.drawLine(x+10, y+1, x+12, y+4);
+  u8g2.drawLine(x+12, y+4, x+10, y+7);
+}
+
+int scrollOffset = 0;
+unsigned long lastPlaybackUpdate = 0;
+
+// ---- main render ----
 void displayMusicFace() {
+  unsigned long now = millis();
+
+  if (musicPlaying) {
+    playbackPosition += now - lastPlaybackUpdate;
+    if (playbackPosition > songDuration)
+      playbackPosition = songDuration;
+  }
+  lastPlaybackUpdate = now;
+
   u8g2.clearBuffer();
 
-  // === LEFT SIDE: Album art ===
-  u8g2.drawXBMP(0, 0, IMG_WIDTH, IMG_HEIGHT, albumArtBuffer);
+  // === left circle ===
+  const int r = 20;
+  const int cx = 20, cy = 25;
+  u8g2.drawDisc(cx, cy, r);
 
-  // === RIGHT SIDE: Song Info ===
-  u8g2.setFont(u8g2_font_6x10_tf);
+  u8g2.setDrawColor(0);
+  drawRotatingMusicNote(cx - noteW / 2, cy - noteH / 2, musicPlaying);
 
-  // Song (line 1)
-  u8g2.drawStr(68, 12, currentSong.substring(0, 10).c_str());
+  // === right text ===
+  const int rightX = 50;
+  const int rightW = SCREEN_WIDTH - rightX;
 
-  // Artist (line 2)
-  u8g2.drawStr(68, 24, currentArtist.substring(0, 10).c_str());
+  // Enable clipping for the right area only
+  u8g2.setClipWindow(rightX, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
 
-  // Play/pause state (line 3)
-  u8g2.drawStr(68, 36, musicPlaying ? "▶ Playing" : "⏸ Paused");
+  // Song name with scrolling
+  u8g2.setDrawColor(1);
+  u8g2.setFont(u8g2_font_ncenB10_tf);
+  int songW = u8g2.getUTF8Width(currentSong.c_str());
+  if (songW <= rightW) {
+    u8g2.drawUTF8(rightX, 18, currentSong.c_str());
+  } else {
+    scrollOffset = (scrollOffset + 1) % (songW + 20);
+    int x = rightX - scrollOffset;
+    u8g2.drawUTF8(x, 18, currentSong.c_str());
+    u8g2.drawUTF8(x + songW + 20, 18, currentSong.c_str());
+  }
+  
+  // Disable clipping for the rest
+  u8g2.setMaxClipWindow();
 
-  // Volume bar (bottom)
-  int volumeWidth = map(musicVolume, 0, 100, 0, 54); // max width ~54 px
-  u8g2.drawFrame(68, 50, 54, 8);
+  // Album + artist with ellipses if too long
+  u8g2.setFont(u8g2_font_6x12_tf);
+
+  String albumStr = currentAlbum;
+  int albumW = u8g2.getUTF8Width(albumStr.c_str());
+  if (albumW > rightW) {
+    // shrink until it fits with ".."
+    while (albumStr.length() > 0 && u8g2.getUTF8Width((albumStr + "..").c_str()) > rightW) {
+      albumStr.remove(albumStr.length() - 1);
+    }
+    albumStr += "..";
+  }
+  u8g2.drawUTF8(rightX, 30, albumStr.c_str());
+
+  String artistStr = currentArtist;
+  int artistW = u8g2.getUTF8Width(artistStr.c_str());
+  if (artistW > rightW) {
+    while (artistStr.length() > 0 && u8g2.getUTF8Width((artistStr + "..").c_str()) > rightW) {
+      artistStr.remove(artistStr.length() - 1);
+    }
+    artistStr += "..";
+  }
+  u8g2.drawUTF8(rightX, 42, artistStr.c_str());
+
+  if (selectedMusicSubstate == SEEK) {
+    // === seek bar ===
+    u8g2.drawFrame(17, 56, 94, 8); // width of the seek bar: 94px
+    int seekBarWidth = map(playbackPosition, 0, songDuration, 0, 94);
+    u8g2.drawBox(17, 56, seekBarWidth, 8);
+    
+    u8g2.setFont(u8g2_font_4x6_tf);
+    u8g2.drawUTF8(0, SCREEN_HEIGHT, millisToTime(songDuration).c_str());
+    u8g2.drawUTF8(111, SCREEN_HEIGHT, millisToTime(playbackPosition).c_str());
+  }
+  else if (selectedMusicSubstate == VOLUME) {
+    // === volume bar ===
+    u8g2.drawFrame(17, 56, 94, 8); // width of the volume bar: 94px
+    int volWidth = map(musicVolume, 0, 100, 0, 94);
+    u8g2.drawBox(17, 56, volWidth, 8);
+
+    drawMuteIcon(0, 56);
+    drawMaxIcon(116, 56);
+  }
 
   u8g2.sendBuffer();
+}
+
+String millisToTime (int millis) {
+  int seconds = millis / 1000;
+  int minutes = seconds / 60;
+  seconds = seconds % 60;
+
+  char buffer[6]; // "MM:SS" + null
+  sprintf(buffer, "%02d:%02d", minutes, seconds);
+  return String(buffer);
 }
 
 void displayNotificationsFace() {
@@ -685,16 +811,145 @@ void displayMenu() {
   u8g2.setFont(u8g2_font_6x10_tf);
 
   u8g2.drawStr(5, 12, "Select Face:");
+  displayMenuItemIcon(menuSelectionIndex);
 
-  for (int i = 0; i < numFaces; i++) {
-    if (i == selectedFaceIndex) {
-      u8g2.drawStr(5, 25 + i * 8, (">" + faceNames[i]).c_str());
-    } else {
-      u8g2.drawStr(10, 25 + i * 8, faceNames[i].c_str());
-    }
-  }
+  String menuItemText = faceNames[menuSelectionIndex];
+  int leftSpacing = (SCREEN_WIDTH - menuItemText.length() * 6) / 2;
+  u8g2.drawStr(leftSpacing, SCREEN_HEIGHT - 4, menuItemText.c_str());
 
   u8g2.sendBuffer();
+}
+
+void displayMenuItemIcon(int index) {
+  int centerX = 128 / 2;
+  int centerY = 34;
+
+  u8g2.setFontMode(1);
+
+  switch (index) {
+    case 0: // Idle - Eyes
+      {
+        int eyeWidth = 18;
+        int eyeHeight = 26;
+        int eyeSpacing = 8;
+        int totalWidth = (eyeWidth * 2) + eyeSpacing;
+        int startX = centerX - (totalWidth / 2);
+        int startY = centerY - (eyeHeight / 2);
+        
+        // Draw left and right eyes as rounded rectangles
+        u8g2.drawRBox(startX, startY, eyeWidth, eyeHeight, 5);
+        u8g2.drawRBox(startX + eyeWidth + eyeSpacing, startY, eyeWidth, eyeHeight, 5);
+      }
+      break;
+
+    case 1: // Clock
+      {
+        int radius = 16;
+        u8g2.drawCircle(centerX, centerY, radius); // Clock face
+        u8g2.drawLine(centerX, centerY, centerX, centerY - 8); // Hour hand (short)
+        u8g2.drawLine(centerX, centerY, centerX + 12, centerY); // Minute hand (long)
+      }
+      break;
+
+    case 2: // Music
+      {
+        // Draw two eighth notes (quavers) connected together
+        int note1_x = centerX - 10;
+        int note2_x = centerX + 10;
+        int stemHeight = 22;
+        int noteHeadRadius = 5;
+        int beamY = centerY - stemHeight/2 - 2;
+
+        // Note 1
+        u8g2.drawDisc(note1_x, centerY + stemHeight/2, noteHeadRadius);
+        u8g2.drawVLine(note1_x + noteHeadRadius, beamY, stemHeight);
+        
+        // Note 2
+        u8g2.drawDisc(note2_x, centerY + stemHeight/2 - 2, noteHeadRadius);
+        u8g2.drawVLine(note2_x + noteHeadRadius, beamY, stemHeight);
+
+        // Connecting beam
+        u8g2.drawBox(note1_x + noteHeadRadius, beamY, (note2_x - note1_x), 3);
+      }
+      break;
+
+    case 3: // Notifications - Bell
+      {
+        int bellWidth = 24;
+        int bellHeight = 20;
+        int startX = centerX - bellWidth/2;
+        int startY = centerY - bellHeight/2;
+
+        // Draw the bell shape using lines
+        u8g2.drawHLine(startX, startY + bellHeight, bellWidth); // Bottom rim
+        u8g2.drawLine(startX, startY + bellHeight, startX + 4, startY); // Left side
+        u8g2.drawLine(startX + bellWidth, startY + bellHeight, startX + bellWidth - 4, startY); // Right side
+        u8g2.drawHLine(startX + 4, startY, bellWidth - 8); // Top flat part
+        u8g2.drawDisc(centerX, startY + bellHeight - 2, 3); // Clapper
+      }
+      break;
+
+    case 4: // Timers - Hourglass
+      {
+        int hgWidth = 20;
+        int hgHeight = 28;
+        int startX = centerX - hgWidth/2;
+        int startY = centerY - hgHeight/2;
+
+        // Frame
+        u8g2.drawFrame(startX, startY, hgWidth, hgHeight);
+        
+        // Top part (sand falling)
+        u8g2.drawTriangle(startX + 2, startY + 2, startX + hgWidth - 3, startY + 2, centerX, centerY);
+        
+        // Bottom part (sand collected)
+        u8g2.drawTriangle(startX + 2, startY + hgHeight - 3, startX + hgWidth - 3, startY + hgHeight - 3, centerX, centerY + 1);
+      }
+      break;
+
+    case 5: // Events - Calendar
+      {
+        int calWidth = 30;
+        int calHeight = 30;
+        int startX = centerX - calWidth/2;
+        int startY = centerY - calHeight/2;
+
+        // Page and binder rings
+        u8g2.drawRFrame(startX, startY, calWidth, calHeight, 3);
+        u8g2.drawHLine(startX, startY + 8, calWidth);
+        u8g2.drawDisc(centerX - 7, startY - 2, 2);
+        u8g2.drawDisc(centerX + 7, startY - 2, 2);
+        
+        // From your displayMenu function, the default font is u8g2_font_6x10_tf
+        // We will restore this font manually since u8g2.getFont() does not exist.
+        
+        // Set a larger font for the date number
+        u8g2.setFont(u8g2_font_ncenB10_tr);
+        char dayStr[3] = "8"; // Example date
+        int textWidth = u8g2.getStrWidth(dayStr);
+        u8g2.drawStr(centerX - textWidth/2, startY + 23, dayStr);
+
+        // IMPORTANT: Restore the original font
+        u8g2.setFont(u8g2_font_6x10_tf);
+      }
+      break;
+
+    case 6: // Go to sleep - Moon
+      {
+        // Create a crescent moon by drawing a white circle, then a black circle offset from it
+        u8g2.setDrawColor(1); // Set color to white
+        u8g2.drawDisc(centerX - 3, centerY, 16);
+        u8g2.setDrawColor(0); // Set color to black (to "erase" part of the first circle)
+        u8g2.drawDisc(centerX + 3, centerY, 14);
+        u8g2.setDrawColor(1); // IMPORTANT: Reset draw color back to white for other elements
+        
+        // Add a few stars
+        u8g2.drawPixel(centerX + 15, centerY - 10);
+        u8g2.drawPixel(centerX + 10, centerY + 12);
+        u8g2.drawPixel(centerX + 20, centerY + 5);
+      }
+      break;
+  }
 }
 
 void displayStatusOverlay() {
@@ -806,9 +1061,9 @@ void handleEncoder1Rotation(int direction) {
     case MUSIC:
       // Previous/Next song
       if (direction > 0) {
-        sendBLECommand("MUSIC_PREV");
-      } else {
         sendBLECommand("MUSIC_NEXT");
+      } else {
+        sendBLECommand("MUSIC_PREV");
       }
       break;
     case NOTIFICATIONS:
@@ -867,23 +1122,38 @@ void handleEncoder1LongPress() {
   }
 }
 
+int seekDuration = 10000; // 10 seconds
+int seekTimer = 1000; // 1 second
+int relativeMillis = 0;
+unsigned long lastSeek = millis();
+
+void updateSeek() {
+  if (relativeMillis != 0 && millis() - lastSeek >= seekTimer) {
+    sendBLECommand("MUSIC_SEEK_RELATIVE:" + String(relativeMillis));
+    relativeMillis = 0;
+  }
+}
+
 void handleEncoder2Rotation(int direction) {
   switch (currentState) {
     case MUSIC:
-      // Volume control
-      musicVolume = constrain(musicVolume + direction * 5, 0, 100);
-      sendBLECommand("MUSIC_VOLUME:" + String(musicVolume));
+      if (selectedMusicSubstate == VOLUME) {
+       // volume controls
+        musicVolume = constrain(musicVolume + direction * 5, 0, 100);
+        sendBLECommand("MUSIC_VOLUME:" + String(musicVolume));
+      } else if (selectedMusicSubstate == SEEK) {
+        // accumulate relative seek
+        relativeMillis += direction * seekDuration;
+        lastSeek = millis(); // reset timer
+      }
       break;
     case EVENTS:
       // traverse current group items
       break;
     case MENU:
-      if (selectedFaceIndex + direction <= 0)
-        selectedFaceIndex = numFaces - 1;
-      if (selectedFaceIndex + direction >= numFaces)
-        selectedFaceIndex = 0;
-      
-      selectedFaceIndex = constrain(selectedFaceIndex + direction, 0, numFaces - 1);
+      menuSelectionIndex -= direction;
+      if (menuSelectionIndex < 0) menuSelectionIndex = numFaces - 1;
+      if (menuSelectionIndex >= numFaces) menuSelectionIndex = 0;
       break;
     case TIMER:
       if (timerState == TIMER_SETUP) {
@@ -896,9 +1166,10 @@ void handleEncoder2Rotation(int direction) {
 void handleEncoder2Click() {
   switch (currentState) {
     case MUSIC:
+      selectedMusicSubstate = selectedMusicSubstate == SEEK ? VOLUME : SEEK;
     case MENU:
       // Select face
-      currentState = faceStates[selectedFaceIndex];
+      currentState = faceStates[menuSelectionIndex];
       break;
     case NOTIFICATIONS:
       // clear selected notification
@@ -917,7 +1188,7 @@ void handleEncoder2LongPress() {
   if (currentState != MENU) {
     previousState = currentState;
     currentState = MENU;
-    selectedFaceIndex = 0;
+    menuSelectionIndex = 0;
   }
 }
 
@@ -1127,21 +1398,28 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
       }
     }
     
-    if (data.startsWith("MUSIC:")) {
-      // Format: MUSIC:song|artist|playing|volume
+   if (data.startsWith("MUSIC:")) {
+      // Format: MUSIC:song|album|artist|playing|volume|songDuration|playbackPosition
       String payload = data.substring(6);
-      int firstPipe = payload.indexOf('|');
-      int secondPipe = payload.indexOf('|', firstPipe + 1);
-      int thirdPipe = payload.indexOf('|', secondPipe + 1);
 
-      if (firstPipe > 0 && secondPipe > firstPipe && thirdPipe > secondPipe) {
-        currentSong = payload.substring(0, firstPipe);
-        currentArtist = payload.substring(firstPipe + 1, secondPipe);
-        musicPlaying = payload.substring(secondPipe + 1, thirdPipe) == "true";
-        musicVolume = payload.substring(thirdPipe + 1).toInt();
+      int firstPipe  = payload.indexOf('|');
+      int secondPipe = payload.indexOf('|', firstPipe + 1);
+      int thirdPipe  = payload.indexOf('|', secondPipe + 1);
+      int fourthPipe = payload.indexOf('|', thirdPipe + 1);
+      int fifthPipe  = payload.indexOf('|', fourthPipe + 1);
+      int sixthPipe  = payload.indexOf('|', fifthPipe + 1);
+
+      if (firstPipe > 0 && secondPipe > firstPipe && thirdPipe > secondPipe && fourthPipe > thirdPipe && fifthPipe > fourthPipe && sixthPipe > fifthPipe) {
+        currentSong      = payload.substring(0, firstPipe);
+        currentAlbum     = payload.substring(firstPipe + 1, secondPipe);
+        currentArtist    = payload.substring(secondPipe + 1, thirdPipe);
+        musicPlaying     = payload.substring(thirdPipe + 1, fourthPipe) == "true";
+        musicVolume      = payload.substring(fourthPipe + 1).toInt();
+        songDuration     = payload.substring(fifthPipe + 1).toInt();
+        playbackPosition = payload.substring(sixthPipe + 1).toInt();
       }
-    } 
-    
+    }
+
     if (data.startsWith("TIME:")) {
       // Handle time sync if needed
       // Format: TIME:HH:MM:SS
@@ -1211,3 +1489,15 @@ void setupNimBLE() {
 
   Serial.println("🚀 BLE server ready - 'DeskCompanion'");
 }
+
+
+// BMP - 'Music Note (BG Transparent)', 25x25px
+// const unsigned char musicNote [] PROGMEM = {
+// 	0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 
+// 	0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0x00, 0x00, 
+// 	0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 
+// 	0x00, 0x0f, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 
+// 	0x07, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 
+// 	0x0f, 0xff, 0x00, 0x00, 0x0f, 0xfe, 0x00, 0x00, 0x07, 0xfe, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 
+// 	0x01, 0xf8, 0x00, 0x00
+// };
