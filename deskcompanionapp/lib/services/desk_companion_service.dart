@@ -1,7 +1,6 @@
 // lib/services/desk_companion_service.dart
 import 'dart:async';
 import 'dart:convert';
-import 'package:deskcompanionapp/pages/music_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -226,7 +225,9 @@ class DeskCompanionService extends ChangeNotifier {
 
     if (data.startsWith("STATUS:")) {
       // Handle status updates from ESP32
-    } else if (data.startsWith("MUSIC")) {
+    }
+
+    if (data.startsWith("MUSIC")) {
       if (data.startsWith("MUSIC_VOLUME")) {
         VolumeController.instance.setVolume(
           double.parse(data.split(":")[1]) / 100.0,
@@ -237,9 +238,10 @@ class DeskCompanionService extends ChangeNotifier {
         _safeSkip(skipNext);
       } else if (data == "MUSIC_PREV") {
         _safeSkip(skipPrevious);
+      } else if (data.startsWith("MUSIC_SEEK_RELATIVE")) {
+        int millis = int.parse(data.split(":")[1]);
+        seekRelative(millis);
       }
-    } else if (data.contains("Hello from ESP32")) {
-      sendToESP32("PONG");
     }
   }
 
@@ -295,10 +297,20 @@ class DeskCompanionService extends ChangeNotifier {
   Future<void> _sendMusicUpdate(PlayerState playerState) async {
     String songName = playerState.track?.name ?? "Unknown";
     String artistName = playerState.track?.artist.name ?? "Unknown";
+    String albumName = playerState.track?.album.name ?? "Unknown";
+
+    int songDuration = playerState.track?.duration ?? 0;
+    int playbackPosition = playerState.playbackPosition;
+
+    // bool isShuffling = playerState.playbackOptions.isShuffling;
+    // bool isPodcast = playerState.track?.isPodcast ?? false;
+    // double playbackSpeed = playerState.playbackSpeed;
+    // TODO podcast options
     bool isPlaying = !playerState.isPaused;
     int volume = (await VolumeController.instance.getVolume() * 100).toInt();
 
-    String musicData = "MUSIC:$songName|$artistName|$isPlaying|$volume";
+    String musicData =
+        "MUSIC:$songName|$albumName|$artistName|$isPlaying|$volume|$songDuration|$playbackPosition";
     await sendToESP32(musicData);
   }
 
@@ -402,6 +414,14 @@ class DeskCompanionService extends ChangeNotifier {
       await SpotifySdk.skipPrevious();
     } catch (e) {
       _log("❌ Skip previous error: $e");
+    }
+  }
+
+  Future<void> seekRelative(int millis) async {
+    try {
+      await SpotifySdk.seekToRelativePosition(relativeMilliseconds: millis);
+    } catch (e) {
+      _log("❌ Relative seek error: $e");
     }
   }
 

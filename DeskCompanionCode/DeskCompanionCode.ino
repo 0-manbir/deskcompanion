@@ -661,8 +661,8 @@ void displayMusicFace() {
     u8g2.drawBox(17, 56, seekBarWidth, 8);
     
     u8g2.setFont(u8g2_font_4x6_tf);
-    u8g2.drawUTF8(0, SCREEN_HEIGHT, millisToTime(songDuration).c_str());
-    u8g2.drawUTF8(111, SCREEN_HEIGHT, millisToTime(playbackPosition).c_str());
+    u8g2.drawUTF8(0, SCREEN_HEIGHT, formatTime(playbackPosition/1000).c_str());
+    u8g2.drawUTF8(111, SCREEN_HEIGHT, formatTime(songDuration/1000).c_str());
   }
   else if (selectedMusicSubstate == VOLUME) {
     // === volume bar ===
@@ -675,16 +675,6 @@ void displayMusicFace() {
   }
 
   u8g2.sendBuffer();
-}
-
-String millisToTime (int millis) {
-  int seconds = millis / 1000;
-  int minutes = seconds / 60;
-  seconds = seconds % 60;
-
-  char buffer[6]; // "MM:SS" + null
-  sprintf(buffer, "%02d:%02d", minutes, seconds);
-  return String(buffer);
 }
 
 void displayNotificationsFace() {
@@ -1122,8 +1112,8 @@ void handleEncoder1LongPress() {
   }
 }
 
-int seekDuration = 10000; // 10 seconds
-int seekTimer = 1000; // 1 second
+int seekDuration = 5000; // 5 seconds
+int seekTimer = 500; // 0.5s
 int relativeMillis = 0;
 unsigned long lastSeek = millis();
 
@@ -1143,6 +1133,7 @@ void handleEncoder2Rotation(int direction) {
         sendBLECommand("MUSIC_VOLUME:" + String(musicVolume));
       } else if (selectedMusicSubstate == SEEK) {
         // accumulate relative seek
+        playbackPosition += direction * seekDuration;
         relativeMillis += direction * seekDuration;
         lastSeek = millis(); // reset timer
       }

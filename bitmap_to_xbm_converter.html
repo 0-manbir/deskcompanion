@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitmap to XBM Converter</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .input-section, .output-section {
+            margin: 25px 0;
+            padding: 20px;
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 2px solid rgba(102, 126, 234, 0.3);
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #444;
+            font-size: 1.1em;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+            margin-bottom: 15px;
+        }
+        
+        select {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+        
+        textarea {
+            height: 120px;
+            resize: vertical;
+        }
+        
+        .output-textarea {
+            height: 200px;
+            background: #f8f9fa;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: block;
+            margin: 20px auto;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.6);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .preview-section {
+            margin: 25px 0;
+            padding: 20px;
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.7);
+            border: 2px solid rgba(118, 75, 162, 0.3);
+            text-align: center;
+        }
+        
+        canvas {
+            border: 2px solid #333;
+            border-radius: 10px;
+            background: white;
+            margin: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+            background: rgba(231, 76, 60, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #e74c3c;
+            margin: 10px 0;
+        }
+        
+        .success {
+            color: #27ae60;
+            font-weight: bold;
+            background: rgba(39, 174, 96, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            border-left: 4px solid #27ae60;
+            margin: 10px 0;
+        }
+        
+        .info {
+            background: rgba(52, 152, 219, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #3498db;
+            margin: 20px 0;
+            color: #2c3e50;
+        }
+        
+        .button-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .button-row button {
+            margin: 5px;
+            padding: 8px 16px;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Bitmap to XBM Converter with Rotation</h1>
+        
+        <div class="info">
+            <strong>How to use:</strong> Paste your bitmap hex data below, set the width and height, choose rotation steps, then click convert. The XBM format will only draw the "1" bits, leaving "0" bits transparent on your OLED display.
+        </div>
+        
+        <div class="input-section">
+            <label for="width">Width (pixels):</label>
+            <input type="number" id="width" value="25" min="1" max="128">
+            
+            <label for="height">Height (pixels):</label>
+            <input type="number" id="height" value="25" min="1" max="128">
+            
+            <label for="rotationSteps">Rotation Steps:</label>
+            <select id="rotationSteps">
+                <option value="1">No rotation (1 frame)</option>
+                <option value="8">8 steps (45° increments)</option>
+                <option value="12">12 steps (30° increments)</option>
+                <option value="16" selected>16 steps (22.5° increments) - Recommended</option>
+                <option value="24">24 steps (15° increments)</option>
+                <option value="32">32 steps (11.25° increments)</option>
+            </select>
+            
+            <label for="bitmapData">Bitmap Data (hex values):</label>
+            <textarea id="bitmapData" placeholder="Paste your hex data here (e.g., 0x00, 0x0f, 0xf8, ...)">0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 
+0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00, 0x0f, 0x00, 0x00, 
+0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 
+0x00, 0x0f, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 
+0x07, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 
+0x0f, 0xff, 0x00, 0x00, 0x0f, 0xfe, 0x00, 0x00, 0x07, 0xfe, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 
+0x01, 0xf8, 0x00, 0x00</textarea>
+        </div>
+        
+        <button onclick="convertToXBM()">🔄 Convert to XBM</button>
+        
+        <div class="preview-section">
+            <h3>Preview & Animation</h3>
+            <div>
+                <canvas id="originalCanvas" width="200" height="200"></canvas>
+                <canvas id="animationCanvas" width="200" height="200"></canvas>
+            </div>
+            <div>Original Bitmap &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Rotation Animation</div>
+            <div class="button-row">
+                <button onclick="toggleAnimation()">▶️ Play Animation</button>
+                <button onclick="exportFrames()">📁 Export All Frames</button>
+            </div>
+        </div>
+        
+        <div class="output-section">
+            <label for="memoryInfo">Memory Usage Info:</label>
+            <div id="memoryInfo" style="background: #e8f4fd; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-family: monospace; font-size: 14px;">Click convert to see memory usage...</div>
+            
+            <label for="xbmOutput">XBM Output (copy this to your Arduino code):</label>
+            <textarea id="xbmOutput" class="output-textarea" readonly placeholder="Converted XBM data will appear here..."></textarea>
+            
+            <label for="codeOutput">Complete C Code with Animation:</label>
+            <textarea id="codeOutput" class="output-textarea" readonly placeholder="Complete Arduino code will appear here..."></textarea>
+        </div>
+    </div>
+
+    <script>
+        let rotatedBitmaps = [];
+        let animationId = null;
+        let isAnimating = false;
+        let currentFrame = 0;
+        
+        function parseHexData(hexString) {
+            // Remove all non-hex characters and extract hex values
+            const hexPattern = /0x[0-9a-fA-F]+/g;
+            const matches = hexString.match(hexPattern);
+            
+            if (!matches) {
+                throw new Error("No valid hex values found");
+            }
+            
+            return matches.map(hex => parseInt(hex, 16));
+        }
+
+        function reverseBits(byte) {
+            let result = 0;
+            for (let i = 0; i < 8; i++) {
+                result = (result << 1) | ((byte >> i) & 1);
+            }
+            return result;
+        }
+
+        function convertBitmapToXBM(bitmapData, width, height) {
+            const bytesPerRow = Math.ceil(width / 8);
+            const xbmData = [];
+            
+            for (let row = 0; row < height; row++) {
+                for (let byteInRow = 0; byteInRow < bytesPerRow; byteInRow++) {
+                    const originalIndex = row * Math.ceil(width / 8) + byteInRow;
+                    
+                    if (originalIndex < bitmapData.length) {
+                        // Reverse bit order for XBM format
+                        const reversedByte = reverseBits(bitmapData[originalIndex]);
+                        xbmData.push(reversedByte);
+                    } else {
+                        xbmData.push(0);
+                    }
+                }
+            }
+            
+            return xbmData;
+        }
+        
+        function rotateBitmap(originalData, width, height, angleRadians) {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const rotatedData = new Array(Math.ceil(width / 8) * height).fill(0);
+            const bytesPerRow = Math.ceil(width / 8);
+            
+            const cos = Math.cos(-angleRadians);
+            const sin = Math.sin(-angleRadians);
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    // Rotate coordinates back to find source pixel
+                    const srcX = Math.round(cos * (x - centerX) - sin * (y - centerY) + centerX);
+                    const srcY = Math.round(sin * (x - centerX) + cos * (y - centerY) + centerY);
+                    
+                    if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
+                        // Check if source pixel is set
+                        const srcByteIndex = srcY * bytesPerRow + Math.floor(srcX / 8);
+                        const srcBitIndex = 7 - (srcX % 8);
+                        
+                        if (srcByteIndex < originalData.length && (originalData[srcByteIndex] & (1 << srcBitIndex))) {
+                            // Set destination pixel
+                            const dstByteIndex = y * bytesPerRow + Math.floor(x / 8);
+                            const dstBitIndex = 7 - (x % 8);
+                            rotatedData[dstByteIndex] |= (1 << dstBitIndex);
+                        }
+                    }
+                }
+            }
+            
+            return rotatedData;
+        }
+
+        function drawBitmap(canvas, data, width, height, isXBM = false) {
+            const ctx = canvas.getContext('2d');
+            const scale = Math.min(canvas.width / width, canvas.height / height);
+            const offsetX = (canvas.width - width * scale) / 2;
+            const offsetY = (canvas.height - height * scale) / 2;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#000';
+            
+            const bytesPerRow = Math.ceil(width / 8);
+            
+            for (let row = 0; row < height; row++) {
+                for (let col = 0; col < width; col++) {
+                    const byteIndex = row * bytesPerRow + Math.floor(col / 8);
+                    const bitIndex = isXBM ? (col % 8) : (7 - (col % 8));
+                    
+                    if (byteIndex < data.length && (data[byteIndex] & (1 << bitIndex))) {
+                        ctx.fillRect(
+                            offsetX + col * scale,
+                            offsetY + row * scale,
+                            scale,
+                            scale
+                        );
+                    }
+                }
+            }
+        }
+
+        function formatXBMData(data, width) {
+            const hex = data.map(byte => `0x${byte.toString(16).padStart(2, '0')}`);
+            const lines = [];
+            
+            for (let i = 0; i < hex.length; i += 12) {
+                lines.push('   ' + hex.slice(i, i + 12).join(', ') + (i + 12 < hex.length ? ',' : ''));
+            }
+            
+            return lines.join('\n');
+        }
+        
+        function animate() {
+            if (!isAnimating || rotatedBitmaps.length === 0) return;
+            
+            const canvas = document.getElementById('animationCanvas');
+            const width = parseInt(document.getElementById('width').value);
+            const height = parseInt(document.getElementById('height').value);
+            
+            if (canvas && rotatedBitmaps[currentFrame]) {
+                drawBitmap(canvas, rotatedBitmaps[currentFrame], width, height, true);
+                currentFrame = (currentFrame + 1) % rotatedBitmaps.length;
+            }
+            
+            animationId = setTimeout(animate, 100); // 10 FPS
+        }
+        
+        function toggleAnimation() {
+            if (rotatedBitmaps.length === 0) {
+                alert('No rotation frames generated yet. Please convert first.');
+                return;
+            }
+            
+            if (isAnimating) {
+                isAnimating = false;
+                if (animationId) clearTimeout(animationId);
+                document.querySelector('button[onclick="toggleAnimation()"]').textContent = '▶️ Play Animation';
+            } else {
+                isAnimating = true;
+                document.querySelector('button[onclick="toggleAnimation()"]').textContent = '⏸️ Pause Animation';
+                animate();
+            }
+        }
+        
+        function exportFrames() {
+            if (rotatedBitmaps.length === 0) {
+                alert('No rotated frames generated yet. Please convert first.');
+                return;
+            }
+            
+            const width = parseInt(document.getElementById('width').value);
+            const height = parseInt(document.getElementById('height').value);
+            const steps = parseInt(document.getElementById('rotationSteps').value);
+            
+            let output = `// Rotating music note animation - ${steps} frames\n`;
+            output += `// Each frame is ${width}x${height} pixels\n`;
+            output += `// Memory usage: ~${(rotatedBitmaps.length * Math.ceil(width/8) * height)} bytes\n\n`;
+            
+            for (let i = 0; i < rotatedBitmaps.length; i++) {
+                const angle = (360 / steps) * i;
+                output += `// Frame ${i} - ${angle}°\n`;
+                output += `const unsigned char musicNote_${i}_xbm[] PROGMEM = {\n`;
+                output += formatXBMData(rotatedBitmaps[i], width);
+                output += `\n};\n\n`;
+            }
+            
+            // Array of pointers
+            output += `// Array of frame pointers for easy animation\n`;
+            output += `const unsigned char* musicNote_frames[] PROGMEM = {\n`;
+            for (let i = 0; i < rotatedBitmaps.length; i++) {
+                output += `   musicNote_${i}_xbm${i < rotatedBitmaps.length - 1 ? ',' : ''}\n`;
+            }
+            output += `};\n\n`;
+            
+            // Animation code
+            output += `// Animation helper\n`;
+            output += `#define MUSIC_NOTE_FRAMES ${rotatedBitmaps.length}\n`;
+            output += `int currentFrame = 0;\n\n`;
+            output += `void drawRotatingMusicNote(int x, int y) {\n`;
+            output += `   u8g2.drawXBM(x, y, ${width}, ${height}, (const unsigned char*)pgm_read_ptr(&musicNote_frames[currentFrame]));\n`;
+            output += `   currentFrame = (currentFrame + 1) % MUSIC_NOTE_FRAMES;\n`;
+            output += `}\n`;
+            
+            // Create and download file
+            const blob = new Blob([output], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rotating_music_note_${steps}_frames.h`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function convertToXBM() {
+            try {
+                const width = parseInt(document.getElementById('width').value);
+                const height = parseInt(document.getElementById('height').value);
+                const steps = parseInt(document.getElementById('rotationSteps').value);
+                const hexString = document.getElementById('bitmapData').value;
+                
+                if (!width || !height || width < 1 || height < 1) {
+                    throw new Error("Please enter valid width and height values");
+                }
+                
+                const originalData = parseHexData(hexString);
+                
+                // Generate rotated versions
+                rotatedBitmaps = [];
+                const angleStep = (2 * Math.PI) / steps;
+                
+                for (let i = 0; i < steps; i++) {
+                    const angle = i * angleStep;
+                    const rotatedData = rotateBitmap(originalData, width, height, angle);
+                    const xbmData = convertBitmapToXBM(rotatedData, width, height);
+                    rotatedBitmaps.push(xbmData);
+                }
+                
+                // Draw original and first frame
+                const originalCanvas = document.getElementById('originalCanvas');
+                const animationCanvas = document.getElementById('animationCanvas');
+                
+                if (originalCanvas && animationCanvas && rotatedBitmaps.length > 0) {
+                    drawBitmap(originalCanvas, originalData, width, height, false);
+                    drawBitmap(animationCanvas, rotatedBitmaps[0], width, height, true);
+                }
+                
+                // Calculate memory usage
+                const bytesPerFrame = Math.ceil(width / 8) * height;
+                const totalBytes = bytesPerFrame * steps;
+                const memoryInfo = `${steps} frames × ${bytesPerFrame} bytes = ${totalBytes} bytes total (${(totalBytes/1024).toFixed(2)} KB)`;
+                const memoryElement = document.getElementById('memoryInfo');
+                if (memoryElement) {
+                    memoryElement.textContent = memoryInfo;
+                }
+                
+                // Generate single frame output (first frame)
+                const xbmOutput = formatXBMData(rotatedBitmaps[0], width);
+                const xbmElement = document.getElementById('xbmOutput');
+                if (xbmElement) {
+                    xbmElement.value = xbmOutput;
+                }
+                
+                // Generate animation code
+                let codeOutput = `// Rotating music note animation - ${steps} frames\n`;
+                codeOutput += `// Memory usage: ${totalBytes} bytes\n\n`;
+                
+                if (steps === 1) {
+                    codeOutput += `// Single frame (no rotation)\n`;
+                    codeOutput += `const unsigned char musicNote_xbm[] PROGMEM = {\n${xbmOutput}\n};\n\n`;
+                    codeOutput += `// Usage: u8g2.drawXBM(x, y, ${width}, ${height}, musicNote_xbm);`;
+                } else {
+                    codeOutput += `// First few frames shown here - click "Export All Frames" for complete code\n`;
+                    for (let i = 0; i < Math.min(3, steps); i++) {
+                        const angle = (360 / steps) * i;
+                        codeOutput += `\n// Frame ${i} - ${angle}°\n`;
+                        codeOutput += `const unsigned char musicNote_${i}_xbm[] PROGMEM = {\n`;
+                        codeOutput += formatXBMData(rotatedBitmaps[i], width);
+                        codeOutput += `\n};\n`;
+                    }
+                    
+                    if (steps > 3) {
+                        codeOutput += `\n// ... ${steps - 3} more frames ...\n`;
+                    }
+                    
+                    codeOutput += `\n// Usage example:\n`;
+                    codeOutput += `// u8g2.drawXBM(x, y, ${width}, ${height}, musicNote_0_xbm);\n`;
+                    codeOutput += `// Click "Export All Frames" button above for complete animation code!`;
+                }
+                
+                const codeElement = document.getElementById('codeOutput');
+                if (codeElement) {
+                    codeElement.value = codeOutput;
+                }
+                
+                // Reset animation
+                isAnimating = false;
+                if (animationId) clearTimeout(animationId);
+                currentFrame = 0;
+                const playButton = document.querySelector('button[onclick="toggleAnimation()"]');
+                if (playButton) {
+                    playButton.textContent = '▶️ Play Animation';
+                }
+                
+                // Show success message
+                const existingMessage = document.querySelector('.success, .error');
+                if (existingMessage) existingMessage.remove();
+                
+                const successDiv = document.createElement('div');
+                successDiv.className = 'success';
+                successDiv.textContent = `✅ Generated ${steps} rotation frames successfully! Try the animation preview.`;
+                const outputSection = document.querySelector('.output-section');
+                if (outputSection) {
+                    outputSection.insertBefore(successDiv, outputSection.firstChild);
+                }
+                
+            } catch (error) {
+                console.error('Conversion error:', error);
+                
+                // Show error message
+                const existingMessage = document.querySelector('.success, .error');
+                if (existingMessage) existingMessage.remove();
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.textContent = '❌ Error: ' + error.message;
+                const outputSection = document.querySelector('.output-section');
+                if (outputSection) {
+                    outputSection.insertBefore(errorDiv, outputSection.firstChild);
+                }
+            }
+        }
+        
+        // Convert on page load with delay to ensure DOM is ready
+        window.addEventListener('load', function() {
+            setTimeout(convertToXBM, 100);
+        });
+    </script>
+</body>
+</html>

@@ -396,17 +396,20 @@ class SettingsPage extends StatelessWidget {
                               "setAsForeground",
                             );
                           },
-                          child: Text("Enable Background"),
+                          child: Text("Enable BG"),
                         ),
                         SizedBox(width: 12),
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
+                            backgroundColor: Colors.red[500],
                           ),
                           onPressed: () {
                             FlutterBackgroundService().invoke("stopService");
                           },
-                          child: Text("Stop Service"),
+                          child: Text(
+                            "Stop",
+                            style: TextStyle(color: Colors.white),
+                          ),
                         ),
                       ],
                     ),
