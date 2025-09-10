@@ -54,6 +54,16 @@ enum MusicSubstate {
 };
 MusicSubstate selectedMusicSubstate = SEEK;
 
+// === Game States ===
+enum GameState {
+  GAME_MENU,
+  GAME_PLAYING,
+  GAME_PAUSED,
+  GAME_OVER
+};
+GameState gameState = GAME_MENU;
+int gameMode = 1; // 1 = single player, 2 = two player
+
 // === Encoder Pins ===
 #define ENCODER1_A 33
 #define ENCODER1_B 25
@@ -146,6 +156,23 @@ const int MAX_NOTIFICATIONS = 10;
 Notification notifications[MAX_NOTIFICATIONS];
 int notificationCount = 0;
 int notificationScrollPos = 0;
+
+// === Pong Game Variables ===
+struct PongGame {
+  float ballX, ballY;
+  float ballVelX, ballVelY;
+  float leftPaddleY, rightPaddleY;
+  int leftScore, rightScore;
+  bool gameActive;
+  unsigned long lastUpdate;
+  
+  // Game settings
+  static const int PADDLE_HEIGHT = 20;
+  static const int PADDLE_WIDTH = 3;
+  static const int BALL_SIZE = 2;
+  static constexpr float BALL_SPEED = 2.0;
+  static constexpr float PADDLE_SPEED = 3.0;
+} pongGame;
 
 // === BLE Setup ===
 #define SERVICE_UUID "fa974e39-7cab-4fa2-8681-1d71f9fb73bc"
@@ -303,7 +330,7 @@ private:
   }
 };
 
-EyeManager eyes(48, 48, 12, 12);
+EyeManager eyes(44, 44, 12, 10); // width, height, spacing, corner
 
 void setup() {
   Serial.begin(115200);
@@ -328,6 +355,9 @@ void setup() {
   encoder1.setCount(0);
 
   lastMotionTime = millis();
+  
+  // Initialize Pong game
+  initializePongGame();
 }
 
 void setupSensors() {
@@ -478,7 +508,7 @@ void handleState() {
       // TODO go to sleep, turn off all sensors
       break;
     case GAMES:
-      // TODO displaygames
+      handleGameState();
       break;
   }
 }
@@ -805,6 +835,214 @@ void displayNotificationPopup() {
   u8g2.sendBuffer();
 }
 
+// === PONG GAME IMPLEMENTATION ===
+void initializePongGame() {
+  pongGame.ballX = SCREEN_WIDTH / 2.0;
+  pongGame.ballY = SCREEN_HEIGHT / 2.0;
+  pongGame.ballVelX = PongGame::BALL_SPEED;
+  pongGame.ballVelY = PongGame::BALL_SPEED;
+  pongGame.leftPaddleY = SCREEN_HEIGHT / 2.0;
+  pongGame.rightPaddleY = SCREEN_HEIGHT / 2.0;
+  pongGame.leftScore = 0;
+  pongGame.rightScore = 0;
+  pongGame.gameActive = false;
+  pongGame.lastUpdate = millis();
+}
+
+void handleGameState() {
+  switch (gameState) {
+    case GAME_MENU:
+      displayGameMenu();
+      break;
+    case GAME_PLAYING:
+      updatePongGame();
+      displayPongGame();
+      break;
+    case GAME_PAUSED:
+      displayPongPaused();
+      break;
+    case GAME_OVER:
+      displayPongGameOver();
+      break;
+  }
+}
+
+void displayGameMenu() {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tf);
+  
+  u8g2.drawStr(45, 15, "PONG");
+  
+  u8g2.drawStr(20, 35, gameMode == 1 ? ">1 Player" : " 1 Player");
+  u8g2.drawStr(20, 47, gameMode == 2 ? ">2 Player" : " 2 Player");
+  
+  u8g2.drawStr(15, 60, "Rotate: Select, Click: Start");
+  
+  u8g2.sendBuffer();
+}
+
+void displayPongGame() {
+  u8g2.clearBuffer();
+  
+  // Draw paddles
+  u8g2.drawBox(2, pongGame.leftPaddleY - PongGame::PADDLE_HEIGHT/2, 
+               PongGame::PADDLE_WIDTH, PongGame::PADDLE_HEIGHT);
+  u8g2.drawBox(SCREEN_WIDTH - 2 - PongGame::PADDLE_WIDTH, 
+               pongGame.rightPaddleY - PongGame::PADDLE_HEIGHT/2, 
+               PongGame::PADDLE_WIDTH, PongGame::PADDLE_HEIGHT);
+  
+  // Draw ball
+  u8g2.drawBox(pongGame.ballX - PongGame::BALL_SIZE/2, 
+               pongGame.ballY - PongGame::BALL_SIZE/2, 
+               PongGame::BALL_SIZE, PongGame::BALL_SIZE);
+  
+  // Draw center line
+  for (int y = 0; y < SCREEN_HEIGHT; y += 4) {
+    u8g2.drawPixel(SCREEN_WIDTH/2, y);
+  }
+  
+  // Draw scores
+  u8g2.setFont(u8g2_font_6x10_tf);
+  u8g2.drawStr(SCREEN_WIDTH/2 - 20, 12, String(pongGame.leftScore).c_str());
+  u8g2.drawStr(SCREEN_WIDTH/2 + 15, 12, String(pongGame.rightScore).c_str());
+  
+  u8g2.sendBuffer();
+}
+
+void displayPongPaused() {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tf);
+  u8g2.drawStr(40, 30, "PAUSED");
+  u8g2.drawStr(20, 45, "Click to resume");
+  u8g2.sendBuffer();
+}
+
+void displayPongGameOver() {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tf);
+  
+  u8g2.drawStr(30, 20, "GAME OVER");
+  
+  String winner = pongGame.leftScore > pongGame.rightScore ? "Left Player Won" : "Right Player Won";
+  if (gameMode == 1) {
+    winner = pongGame.leftScore > pongGame.rightScore ? "You Win!" : "You Lose!";
+  }
+  
+  u8g2.drawStr(15, 35, winner.c_str());
+  u8g2.drawStr(10, 50, ("Score: " + String(pongGame.leftScore) + " - " + String(pongGame.rightScore)).c_str());
+  u8g2.drawStr(20, 62, "Click to restart");
+  
+  u8g2.sendBuffer();
+}
+
+void updatePongGame() {
+  if (!pongGame.gameActive) return;
+  
+  unsigned long currentTime = millis();
+  float deltaTime = (currentTime - pongGame.lastUpdate) / 1000.0;
+  pongGame.lastUpdate = currentTime;
+  
+  // Update ball position
+  pongGame.ballX += pongGame.ballVelX;
+  pongGame.ballY += pongGame.ballVelY;
+  
+  // Ball collision with top/bottom walls
+  if (pongGame.ballY <= PongGame::BALL_SIZE/2 || pongGame.ballY >= SCREEN_HEIGHT - PongGame::BALL_SIZE/2) {
+    pongGame.ballVelY = -pongGame.ballVelY;
+  }
+  
+  // Ball collision with left paddle
+  if (pongGame.ballX <= 2 + PongGame::PADDLE_WIDTH + PongGame::BALL_SIZE/2 &&
+      pongGame.ballY >= pongGame.leftPaddleY - PongGame::PADDLE_HEIGHT/2 &&
+      pongGame.ballY <= pongGame.leftPaddleY + PongGame::PADDLE_HEIGHT/2 &&
+      pongGame.ballVelX < 0) {
+    bounceOffPaddle(pongGame.leftPaddleY);
+    playTone(800, 50);
+  }
+  
+  // Ball collision with right paddle
+  if (pongGame.ballX >= SCREEN_WIDTH - 2 - PongGame::PADDLE_WIDTH - PongGame::BALL_SIZE/2 &&
+      pongGame.ballY >= pongGame.rightPaddleY - PongGame::PADDLE_HEIGHT/2 &&
+      pongGame.ballY <= pongGame.rightPaddleY + PongGame::PADDLE_HEIGHT/2 &&
+      pongGame.ballVelX > 0) {
+    bounceOffPaddle(pongGame.rightPaddleY);
+    playTone(800, 50);
+  }
+  
+  // AI for single player mode (right paddle)
+  if (gameMode == 1) {
+    float aiSpeed = PongGame::PADDLE_SPEED * 0.7; // Make AI slightly slower
+    if (pongGame.ballY < pongGame.rightPaddleY - 5) {
+      pongGame.rightPaddleY -= aiSpeed;
+    } else if (pongGame.ballY > pongGame.rightPaddleY + 5) {
+      pongGame.rightPaddleY += aiSpeed;
+    }
+    
+    // Keep AI paddle in bounds
+    pongGame.rightPaddleY = constrain(pongGame.rightPaddleY, 
+                                     PongGame::PADDLE_HEIGHT/2, 
+                                     SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
+  }
+  
+  // Score detection
+  if (pongGame.ballX < 0) {
+    pongGame.rightScore++;
+    resetBall();
+    playTone(400, 200);
+    
+    if (pongGame.rightScore >= 3) {
+      gameState = GAME_OVER;
+    }
+  } else if (pongGame.ballX > SCREEN_WIDTH) {
+    pongGame.leftScore++;
+    resetBall();
+    playTone(600, 200);
+    
+    if (pongGame.leftScore >= 3) {
+      gameState = GAME_OVER;
+    }
+  }
+}
+
+// Adjust bounce angle + increase speed over time
+void bounceOffPaddle(float paddleY) {
+  // relative hit position: -1.0 (top) → 0 (center) → +1.0 (bottom)
+  float relativeY = (pongGame.ballY - paddleY) / (PongGame::PADDLE_HEIGHT / 2.0);
+
+  // max bounce angle ~ 60 degrees
+  float maxAngle = PI / 3; 
+  float bounceAngle = relativeY * maxAngle;
+
+  // increase speed gradually (up to a limit)
+  static float currentSpeed = PongGame::BALL_SPEED;
+  currentSpeed *= 1.05;                     // +5% each hit
+  if (currentSpeed > 6.0) currentSpeed = 6.0;  // cap speed
+
+  // flip X depending on which side
+  float dir = (pongGame.ballVelX > 0) ? -1 : 1;
+
+  pongGame.ballVelX = dir * currentSpeed * cos(bounceAngle);
+  pongGame.ballVelY = currentSpeed * sin(bounceAngle);
+
+  // safeguard: never perfectly flat
+  if (fabs(pongGame.ballVelY) < 0.1) {
+    pongGame.ballVelY = (random(0, 2) == 0 ? 1 : -1) * 0.5;
+  }
+}
+
+void resetBall() {
+  pongGame.ballX = SCREEN_WIDTH / 2;
+  pongGame.ballY = SCREEN_HEIGHT / 2;
+
+  float angle = random(-45, 45) * PI / 180.0; // random small angle
+  float dir = (random(0, 2) == 0 ? -1 : 1);
+
+  // reset speed back to base
+  bounceOffPaddle(pongGame.leftPaddleY); // just to use formula
+  pongGame.ballVelX = dir * PongGame::BALL_SPEED * cos(angle);
+  pongGame.ballVelY = PongGame::BALL_SPEED * sin(angle);
+}
+
 // === Encoder 1 ===
 void checkEncoder1() {
   int newPos = encoder1.getCount() / 4;
@@ -870,6 +1108,17 @@ void handleEncoder1Rotation(int direction) {
         selectedTimerType = (TimerType)constrain((int)selectedTimerType + direction, 0, 2);
       }
       break;
+    case GAMES:
+      if (gameState == GAME_MENU) {
+        gameMode = constrain(gameMode + direction, 1, 2);
+      } else if (gameState == GAME_PLAYING && pongGame.gameActive) {
+        // Move left paddle
+        pongGame.leftPaddleY -= direction * PongGame::PADDLE_SPEED;
+        pongGame.leftPaddleY = constrain(pongGame.leftPaddleY, 
+                                        PongGame::PADDLE_HEIGHT/2, 
+                                        SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
+      }
+      break;
   }
 }
 
@@ -895,6 +1144,26 @@ void handleEncoder1Click() {
         timerState = timerRunning ? TIMER_RUNNING : TIMER_PAUSED;
       }
       break;
+    case GAMES:
+      if (gameState == GAME_MENU) {
+        // Start game
+        initializePongGame();
+        pongGame.gameActive = true;
+        gameState = GAME_PLAYING;
+      } else if (gameState == GAME_PLAYING) {
+        // Pause game
+        gameState = GAME_PAUSED;
+        pongGame.gameActive = false;
+      } else if (gameState == GAME_PAUSED) {
+        // Resume game
+        gameState = GAME_PLAYING;
+        pongGame.gameActive = true;
+        pongGame.lastUpdate = millis();
+      } else if (gameState == GAME_OVER) {
+        // Restart game
+        gameState = GAME_MENU;
+      }
+      break;
   }
 }
 
@@ -911,6 +1180,11 @@ void handleEncoder1LongPress() {
       break;
     case EVENTS:
       // change grid<->linear
+      break;
+    case GAMES:
+      // Exit to menu
+      gameState = GAME_MENU;
+      pongGame.gameActive = false;
       break;
   }
 }
@@ -954,6 +1228,15 @@ void handleEncoder2Rotation(int direction) {
         timerMinutes = constrain(timerMinutes + direction, 1, 120);
       }
       break;
+    case GAMES:
+      if (gameState == GAME_PLAYING && pongGame.gameActive && gameMode == 2) {
+        // Move right paddle (only in 2-player mode)
+        pongGame.rightPaddleY -= direction * PongGame::PADDLE_SPEED;
+        pongGame.rightPaddleY = constrain(pongGame.rightPaddleY, 
+                                         PongGame::PADDLE_HEIGHT/2, 
+                                         SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
+      }
+      break;
   }
 }
 
@@ -961,6 +1244,7 @@ void handleEncoder2Click() {
   switch (currentState) {
     case MUSIC:
       selectedMusicSubstate = selectedMusicSubstate == SEEK ? VOLUME : SEEK;
+      break;
     case MENU:
       // Select face
       currentState = faceStates[menuSelectionIndex];
@@ -973,6 +1257,10 @@ void handleEncoder2Click() {
       break;
     case TIMER:
       handleTimerClick();
+      break;
+    case GAMES:
+      // Same as encoder1 click for games
+      handleEncoder1Click();
       break;
   }
 }
