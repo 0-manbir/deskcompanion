@@ -1,6 +1,7 @@
 // lib/services/desk_companion_service.dart
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -53,6 +54,19 @@ class DeskCompanionService extends ChangeNotifier {
   List<ServiceNotificationEvent> get recentNotifications =>
       _recentNotifications;
   String get connectionLog => _connectionLog;
+
+  static const platform = MethodChannel('app_info');
+
+  static Future<String> getAppName(String packageName) async {
+    try {
+      final appName = await platform.invokeMethod<String>('getAppName', {
+        'packageName': packageName,
+      });
+      return appName ?? packageName;
+    } catch (e) {
+      return packageName; // fallback
+    }
+  }
 
   // Initialize the service
   Future<void> initialize() async {
@@ -321,7 +335,9 @@ class DeskCompanionService extends ChangeNotifier {
     String title = notification.title ?? "";
     String content = notification.content ?? "";
 
-    String notifData = "NOTIFICATION:$app|$title|$content";
+    String appName = await getAppName(app);
+
+    String notifData = "NOTIFICATION:$appName|$title|$content";
     await sendToESP32(notifData);
   }
 

@@ -1,5 +1,6 @@
 package com.example.deskcompanionapp
 
+import android.content.pm.PackageManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -30,10 +31,29 @@ class MainActivity: FlutterActivity() {
                 "requestIgnoreBatteryOptimizations" -> {
                     result.success(true)
                 }
+                "getAppName" -> {
+                    val packageName = call.argument<String>("packageName")
+                    if (packageName != null) {
+                        val appName = getAppNameFromPackage(packageName)
+                        result.success(appName)
+                    } else {
+                        result.error("INVALID_ARGS", "Package name is null", null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }
             }
+        }
+    }
+
+    private fun getAppNameFromPackage(packageName: String): String {
+        return try {
+            val packageManager = applicationContext.packageManager
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: PackageManager.NameNotFoundException) {
+            packageName // fallback if not found
         }
     }
 }

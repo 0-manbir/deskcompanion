@@ -41,11 +41,11 @@ enum TimerSubstate {
 TimerSubstate timerState = TIMER_SELECT;
 
 enum TimerType {
-  STOPWATCH,
   COUNTDOWN,
+  STOPWATCH,
   POMODORO
 };
-TimerType selectedTimerType = STOPWATCH;
+TimerType selectedTimerType = COUNTDOWN;
 
 // === Music Display ===
 enum MusicSubstate {
@@ -89,14 +89,14 @@ bool encoder1LongPress = false;
 bool encoder2LongPress = false;
 unsigned long encoder1BtnStart = 0;
 unsigned long encoder2BtnStart = 0;
-const unsigned long LONG_PRESS_TIME = 1000;  // 1 second
+const unsigned long LONG_PRESS_TIME = 500;  // 0.5s second
 const unsigned long debounceDelay = 200;     // debounce time (ms)
 
 // === PIR Sensor ===
 #define PIR_PIN 35
 bool userPresent = false;
 unsigned long lastMotionTime = 0;
-const unsigned long SLEEP_DELAY = 30000;  // 30 seconds
+const unsigned long SLEEP_DELAY = 1000;  // 1 seconds
 bool isAsleep = false;
 
 // === Sensors ===
@@ -105,7 +105,10 @@ Adafruit_ADXL345_Unified adxl = Adafruit_ADXL345_Unified(12345);
 
 // === Display & Animation Timing ===
 unsigned long lastEyeAnim = 0;
-const unsigned long eyeAnimInterval = 5000;
+const unsigned long eyeAnimInterval = 4000;
+unsigned long lastLookAround = 0;
+unsigned long lookAroundInterval = 3000;
+float lookOffsetX = 0, lookOffsetY = 0;
 unsigned long lastAccelRead = 0;
 const unsigned long accelReadInterval = 50;
 unsigned long lastTempRead = 0;
@@ -130,6 +133,10 @@ unsigned long timerElapsed = 0;
 bool timerRunning = false;
 int pomodoroSession = 1;
 int timerMinutes = 5;  // Default timer setting
+const int timerMinutesPreset[] = {1, 2, 5, 10, 15, 20, 25, 30, 45, 60, 90, 120};
+const int timerPresets = 12;
+int timerMinutesIndex = 0;
+bool pomodoroOnBreak = false;
 
 // === Music Info ===
 String currentSong = "No Music";
@@ -145,6 +152,11 @@ float temperature = 0;
 float humidity = 0;
 float tiltX = 0, tiltY = 0;
 
+// === Clock ===
+int currentHour = 0, currentMinute = 0, currentSecond = 0;
+unsigned long lastTimeSync = 0;   // millis of last sync
+unsigned long lastTick = 0;       // millis of last second update
+
 // === Notification System ===
 struct Notification {
   String app;
@@ -156,6 +168,14 @@ const int MAX_NOTIFICATIONS = 10;
 Notification notifications[MAX_NOTIFICATIONS];
 int notificationCount = 0;
 int notificationScrollPos = 0;
+
+// === Events ===
+#define MAX_EVENTS 10
+
+String eventNames[MAX_EVENTS];
+int eventDurations[MAX_EVENTS]; // in minutes
+int numEvents = 0;
+int selectedEventIndex = 0;
 
 // === Pong Game Variables ===
 struct PongGame {
@@ -283,12 +303,11 @@ public:
   }
 
   void wakeup() {
-    reset();
     for (int h = 2; h <= defaultH; h += 4) {
       left.h = right.h = h;
       left.corner = right.corner = min(h, defaultCorner);
       draw();
-      delay(15);
+      delay(10);
     }
   }
 
@@ -373,11 +392,15 @@ void setupSensors() {
 
 void loop() {
   checkEncoders();
-  readSensors();
-  handleSleepMode();
-  handleOverlays();
+  updateClock();
   handleState();
-  updateSeek(); // listen for seek input
+
+  if (currentState != SLEEP) {
+    readSensors();
+    handleSleepMode();
+    handleOverlays();
+    updateSeek(); // listen for seek input
+  }
 
   if (deviceConnected) {
     static unsigned long lastSent = 0;
@@ -393,22 +416,29 @@ void checkEncoders() {
   bool btn1 = !digitalRead(ENCODER1_BTN);
   bool btn2 = !digitalRead(ENCODER2_BTN);
 
-  // Handle long press detection
+  // === Encoder 1 ===
   if (btn1 && !encoder1BtnPressed) {
+    // Button just pressed
     encoder1BtnStart = millis();
-  } else if (!btn1 && encoder1BtnPressed) {
+    encoder1LongPress = false;
+  } else if (btn1 && encoder1BtnPressed && !encoder1LongPress) {
+    // Still holding -> check for long press
     if (millis() - encoder1BtnStart >= LONG_PRESS_TIME) {
-      encoder1LongPress = true;
+      encoder1LongPress = true;  // Trigger once
     }
   }
+
+  // === Encoder 2 ===
   if (btn2 && !encoder2BtnPressed) {
     encoder2BtnStart = millis();
-  } else if (!btn2 && encoder2BtnPressed) {
+    encoder2LongPress = false;
+  } else if (btn2 && encoder2BtnPressed && !encoder2LongPress) {
     if (millis() - encoder2BtnStart >= LONG_PRESS_TIME) {
       encoder2LongPress = true;
     }
   }
 
+  // Update states
   encoder1BtnPressed = btn1;
   encoder2BtnPressed = btn2;
 
@@ -421,9 +451,7 @@ void readSensors() {
   userPresent = digitalRead(PIR_PIN);
   if (userPresent) {
     lastMotionTime = millis();
-    if (isAsleep) {
-      wakeUp();
-    }
+    if (isAsleep) wakeUp();
   }
 
   // Temperature and humidity
@@ -438,10 +466,27 @@ void readSensors() {
     sensors_event_t event;
     adxl.getEvent(&event);
 
-    tiltX = event.acceleration.x / 9.8;  // Normalize to g-force
-    tiltY = event.acceleration.y / 9.8;
+    tiltX = -event.acceleration.y / 9.8;   // forward/back (Y is downward arrow → invert for chest mount)
+    tiltY =  event.acceleration.x / 9.8;   // left/right tilt (X arrow is left)
 
     lastAccelRead = millis();
+  }
+}
+
+void updateClock() {
+  // Tick every second
+  if (millis() - lastTick >= 1000) {
+    lastTick += 1000;
+    currentSecond++;
+    if (currentSecond >= 60) {
+      currentSecond = 0;
+      currentMinute++;
+      if (currentMinute >= 60) {
+        currentMinute = 0;
+        currentHour++;
+        if (currentHour >= 24) currentHour = 0;
+      }
+    }
   }
 }
 
@@ -505,7 +550,7 @@ void handleState() {
       displayNotificationPopup();
       break;
     case SLEEP:
-      // TODO go to sleep, turn off all sensors
+      goToSleep();
       break;
     case GAMES:
       handleGameState();
@@ -515,7 +560,7 @@ void handleState() {
 
 void handleIdleState() {
   // Apply tilt to eyes for fluid animation
-  eyes.applyTilt(tiltX, tiltY);
+  eyes.applyTilt(tiltX + lookOffsetX, tiltY + lookOffsetY);
   eyes.draw();
 
   // Periodic blinking
@@ -523,21 +568,50 @@ void handleIdleState() {
     eyes.blink();
     lastEyeAnim = millis();
   }
+
+  // Random look-around
+  // if (millis() - lastLookAround > lookAroundInterval) {
+  //   lookOffsetX = random(-40, 41) / 10.0f;  // -2.0 to +2.0
+  //   lookOffsetY = random(-40, 41) / 10.0f;
+
+  //   lookAroundInterval = random(3000, 8000);  // next glance in 3–8s
+  //   lastLookAround = millis();
+  // }
 }
 
 void displayClockFace() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB18_tr);
 
-  // Get current time (you'll need to implement RTC or NTP)
-  String timeStr = "12:34";
-  u8g2.drawStr(20, 30, timeStr.c_str());
+  int displayHour = currentHour % 12;
+  if (displayHour == 0) displayHour = 12;
+  bool isPM = (currentHour >= 12);
 
-  u8g2.setFont(u8g2_font_6x10_tf);
-  String temp = String(temperature, 1);
-  temp.remove(temp.length() - 1);
-  String tempStr = temp + "°C " + String(humidity, 0) + "%";
-  u8g2.drawStr(5, 55, tempStr.c_str());
+  char timeStr[6];
+  if (millis() / 500 % 2 == 0) {
+    sprintf(timeStr, "%02d:%02d", displayHour, currentMinute);
+  } else {
+    sprintf(timeStr, "%02d %02d", displayHour, currentMinute); // replace colon with space
+  }
+
+  u8g2.setFont(u8g2_font_courB24_tn);  // monospaced digits + colon
+  int timeWidth = u8g2.getStrWidth(timeStr);
+  int timeX = (128 - timeWidth) / 2;
+  int timeY = 34;
+  u8g2.drawStr(timeX, timeY, timeStr);
+
+  u8g2.setFont(u8g2_font_6x12_tf);
+  const char* ampmStr = isPM ? "PM" : "AM";
+  int ampmX = timeX + timeWidth + 2;
+  int ampmY = timeY;
+  u8g2.drawStr(ampmX, ampmY, ampmStr);
+
+  u8g2.drawLine(10, 40, 118, 40);
+
+  u8g2.setFont(u8g2_font_7x13_tf);
+  char infoStr[20];
+  sprintf(infoStr, "%.1f%sC  %d%%", temperature, "\xB0", (int)humidity);
+  int infoWidth = u8g2.getStrWidth(infoStr);
+  u8g2.drawStr((128 - infoWidth) / 2, 60, infoStr);
 
   u8g2.sendBuffer();
 }
@@ -573,15 +647,6 @@ unsigned long lastPlaybackUpdate = 0;
 
 // ---- main render ----
 void displayMusicFace() {
-  unsigned long now = millis();
-
-  if (musicPlaying) {
-    playbackPosition += now - lastPlaybackUpdate;
-    if (playbackPosition > songDuration)
-      playbackPosition = songDuration;
-  }
-  lastPlaybackUpdate = now;
-
   u8g2.clearBuffer();
 
   // === left circle ===
@@ -641,9 +706,9 @@ void displayMusicFace() {
 
   if (selectedMusicSubstate == SEEK) {
     // === seek bar ===
-    u8g2.drawFrame(17, 56, 94, 8); // width of the seek bar: 94px
-    int seekBarWidth = map(playbackPosition, 0, songDuration, 0, 94);
-    u8g2.drawBox(17, 56, seekBarWidth, 8);
+    u8g2.drawFrame(20, 56, 88, 8); // width of the seek bar: 88px
+    int seekBarWidth = map(playbackPosition, 0, songDuration, 0, 88);
+    u8g2.drawBox(20, 56, seekBarWidth, 8);
     
     u8g2.setFont(u8g2_font_4x6_tf);
     u8g2.drawUTF8(0, SCREEN_HEIGHT, formatTime(playbackPosition/1000).c_str());
@@ -651,9 +716,9 @@ void displayMusicFace() {
   }
   else if (selectedMusicSubstate == VOLUME) {
     // === volume bar ===
-    u8g2.drawFrame(17, 56, 94, 8); // width of the volume bar: 94px
-    int volWidth = map(musicVolume, 0, 100, 0, 94);
-    u8g2.drawBox(17, 56, volWidth, 8);
+    u8g2.drawFrame(20, 56, 88, 8); // width of the volume bar: 88px
+    int volWidth = map(musicVolume, 0, 100, 0, 88);
+    u8g2.drawBox(20, 56, volWidth, 8);
 
     drawMuteIcon(0, 56);
     drawMaxIcon(116, 56);
@@ -685,87 +750,107 @@ void displayNotificationsFace() {
 
 void handleTimerState() {
   switch (timerState) {
-    case TIMER_SELECT:
-      displayTimerSelect();
-      break;
-    case TIMER_SETUP:
-      displayTimerSetup();
-      break;
+    case TIMER_SELECT: displayTimerSelect(); break;
+    case TIMER_SETUP: displayTimerSetup(); break;
     case TIMER_RUNNING:
-    case TIMER_PAUSED:
-      displayTimerRunning();
-      updateTimer();
-      break;
-    case TIMER_FINISHED:
-      displayTimerFinished();
-      break;
+    case TIMER_PAUSED: displayTimerRunning(); updateTimer(); break;
+    case TIMER_FINISHED: displayTimerFinished(); break;
   }
 }
 
 void displayTimerSelect() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x10_tf);
 
-  u8g2.drawStr(5, 15, "Select Timer Type:");
+  u8g2.setFont(u8g2_font_7x13B_tf);
+  u8g2.drawStr(15, 15, "Select Timer:");
 
-  String types[] = { "Stopwatch", "Countdown", "Pomodoro" };
+  const char* types[] = { "Countdown", "Stopwatch", "Pomodoro" };
   for (int i = 0; i < 3; i++) {
-    if (i == (int)selectedTimerType) {
-      u8g2.drawStr(5, 30 + i * 12, (">" + types[i]).c_str());
-    } else {
-      u8g2.drawStr(10, 30 + i * 12, types[i].c_str());
-    }
+    if (i == (int)selectedTimerType) u8g2.drawStr(10, 32 + i * 14, ("> " + String(types[i])).c_str());
+    else u8g2.drawStr(20, 32 + i * 14, types[i]);
   }
 
   u8g2.sendBuffer();
 }
 
+// === Timer Setup Screen ===
 void displayTimerSetup() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x10_tf);
 
-  u8g2.drawStr(5, 15, "Set Duration:");
-  String minStr = String(timerMinutes) + " minutes";
-  u8g2.drawStr(5, 35, minStr.c_str());
-  u8g2.drawStr(5, 50, "Click to start");
+  u8g2.setFont(u8g2_font_7x13B_tf);
+  u8g2.drawStr(15, 15, "Set Duration:");
+
+  u8g2.setFont(u8g2_font_logisoso18_tr);
+  String minStr = String(timerMinutes) + " min";
+  int w = u8g2.getStrWidth(minStr.c_str());
+  u8g2.drawStr((128 - w) / 2, 46, minStr.c_str());
 
   u8g2.sendBuffer();
 }
 
+// === Timer Running Screen ===
 void displayTimerRunning() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB14_tr);
 
-  if (selectedTimerType == STOPWATCH) {
-    unsigned long elapsed = timerRunning ? (millis() - timerStartTime + timerElapsed) : timerElapsed;
-    String timeStr = formatTime(elapsed / 1000);
-    u8g2.drawStr(10, 30, timeStr.c_str());
-  } else {
+  u8g2.setFont(u8g2_font_logisoso24_tr);
+  unsigned long value;
+
+  if (selectedTimerType == STOPWATCH)
+    value = timerRunning ? (millis() - timerStartTime + timerElapsed) : timerElapsed;
+  else
+    value = timerDuration - (timerRunning ? (millis() - timerStartTime + timerElapsed) : timerElapsed);
+
+  String timeStr = formatTime(value / 1000);
+  int w = u8g2.getStrWidth(timeStr.c_str());
+  u8g2.drawStr((128 - w) / 2, 30, timeStr.c_str());
+
+  // Progress bar (for countdown/pomodoro only)
+  if (selectedTimerType != STOPWATCH) {
     unsigned long remaining = timerDuration - (timerRunning ? (millis() - timerStartTime + timerElapsed) : timerElapsed);
-    String timeStr = formatTime(remaining / 1000);
-    u8g2.drawStr(10, 30, timeStr.c_str());
-
-    // Progress bar
     int progress = map(timerDuration - remaining, 0, timerDuration, 0, 118);
-    u8g2.drawFrame(5, 45, 118, 8);
-    u8g2.drawBox(5, 45, progress, 8);
+
+    int barX = 5, barY = 36, barW = 118, barH = 12;
+    int fillH = barH - 3;   // reduce height by ~3 px
+    int offsetY = (barH - fillH) / 2;
+
+    u8g2.drawFrame(barX, barY, barW, barH); // Frame
+    u8g2.drawBox(barX, barY + offsetY, progress, fillH); // Fill
+
+    // Rounded ends
+    u8g2.drawDisc(barX, barY + barH/2, fillH/2, U8G2_DRAW_ALL);
+    u8g2.drawDisc(barX + progress, barY + barH/2, fillH/2, U8G2_DRAW_ALL);
   }
 
-  u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(5, 60, timerRunning ? "Running" : "Paused");
+  if (timerRunning) {
+    u8g2.drawBox(108, 55, 3, 10);
+    u8g2.drawBox(114, 55, 3, 10);
+  } else u8g2.drawTriangle(110, 55, 110, 65, 118, 60);
+
+  // Pomodoro mode
+  if (selectedTimerType == POMODORO) {
+    u8g2.setFont(u8g2_font_6x10_tf);
+    const char* modeStr = pomodoroOnBreak ? "BREAK" : "WORK";
+    int mw = u8g2.getStrWidth(modeStr);
+    u8g2.drawStr((128 - mw) / 2, 62, modeStr);
+  }
 
   u8g2.sendBuffer();
 }
 
+// === Timer Finished Screen ===
 void displayTimerFinished() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB14_tr);
-  u8g2.drawStr(10, 30, "FINISHED!");
+
+  u8g2.setFont(u8g2_font_logisoso18_tr);
+  int w = u8g2.getStrWidth("FINISHED!");
+  u8g2.drawStr((128 - w) / 2, 30, "FINISHED!");
+
   u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(5, 50, "Click to reset");
+  u8g2.drawStr(25, 55, "Click knob to reset");
+
   u8g2.sendBuffer();
 
-  // Sound alarm
+  // alarm beep
   static unsigned long lastBeep = 0;
   if (millis() - lastBeep > 1000) {
     playTone(1000, 200);
@@ -776,8 +861,40 @@ void displayTimerFinished() {
 void displayEventsFace() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
-  u8g2.drawStr(25, 32, "Events/TODOs");
-  u8g2.drawStr(15, 45, "Coming from app...");
+
+  if (numEvents == 0) {
+    u8g2.drawStr(35, 32, "No events!");
+  } else {
+    int rowHeight = 12;
+    int yStart = 20;
+    int timeColWidth = 25;  // space reserved for "XXXm"
+    int nameStartX = timeColWidth + 8;
+
+    for (int i = 0; i < numEvents; i++) {
+      int y = yStart + i * rowHeight;
+
+      // Highlight bar if selected
+      if (i == selectedEventIndex) {
+        u8g2.drawBox(0, y - rowHeight + 3, SCREEN_WIDTH, rowHeight);
+        u8g2.setDrawColor(0);
+      }
+
+      // Duration (right aligned in time column)
+      char timeBuf[8];
+      sprintf(timeBuf, "%dm", eventDurations[i]);
+      int timeWidth = u8g2.getStrWidth(timeBuf);
+      u8g2.drawStr(timeColWidth - timeWidth, y, timeBuf);
+
+      // Event name
+      u8g2.drawStr(nameStartX, y, eventNames[i].c_str());
+
+      // Reset draw color
+      if (i == selectedEventIndex) {
+        u8g2.setDrawColor(1);
+      }
+    }
+  }
+
   u8g2.sendBuffer();
 }
 
@@ -785,12 +902,24 @@ void displayMenu() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
 
-  u8g2.drawStr(5, 12, "Select Face:");
+  int unselectedRad = 1, selectedRad = 2, discSpace = 5;
+  int xPos = (128 - numFaces * (unselectedRad*2 + discSpace)) / 2 + discSpace, yPos = 4;
+
+  for (int i = 0; i < numFaces; i++)
+    u8g2.drawDisc(xPos + (i * (unselectedRad*2 + discSpace)), yPos, i == menuSelectionIndex ? selectedRad : unselectedRad);
+
   displayMenuItemIcon(menuSelectionIndex);
 
   String menuItemText = faceNames[menuSelectionIndex];
   int leftSpacing = (SCREEN_WIDTH - menuItemText.length() * 6) / 2;
   u8g2.drawStr(leftSpacing, SCREEN_HEIGHT - 4, menuItemText.c_str());
+
+  int leftArrowX = 20;
+  int arrowY = (SCREEN_HEIGHT / 2) + 5;
+  u8g2.drawTriangle(leftArrowX, arrowY, leftArrowX + 6, arrowY - 5, leftArrowX + 6, arrowY + 5);
+
+  int rightArrowX = SCREEN_WIDTH - 20;
+  u8g2.drawTriangle(rightArrowX, arrowY, rightArrowX - 6, arrowY - 5, rightArrowX - 6, arrowY + 5);
 
   u8g2.sendBuffer();
 }
@@ -810,7 +939,7 @@ void displayMenuItemIcon(int index) {
     case 0: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, idleFace); break;
     case 1: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, clockFace); break;
     case 2: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, musicFace); break;
-    case 3: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, notificationsFace); break;
+    case 3: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, notifFace); break;
     case 4: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, timerFace); break;
     case 5: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, eventsFace); break;
     case 6: u8g2.drawXBM(startX, startY, faceIconSize, faceIconSize, sleepFace); break;
@@ -1100,29 +1229,24 @@ void handleEncoder1Rotation(int direction) {
     case NOTIFICATIONS:
       notificationScrollPos = constrain(notificationScrollPos + direction, 0, max(0, notificationCount - 5));
       break;
-    case EVENTS:
-      // change event-group
-      break;
-    case TIMER:
-      if (timerState == TIMER_SELECT) {
-        selectedTimerType = (TimerType)constrain((int)selectedTimerType + direction, 0, 2);
-      }
-      break;
     case GAMES:
       if (gameState == GAME_MENU) {
         gameMode = constrain(gameMode + direction, 1, 2);
       } else if (gameState == GAME_PLAYING && pongGame.gameActive) {
         // Move left paddle
         pongGame.leftPaddleY -= direction * PongGame::PADDLE_SPEED;
-        pongGame.leftPaddleY = constrain(pongGame.leftPaddleY, 
-                                        PongGame::PADDLE_HEIGHT/2, 
-                                        SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
+        pongGame.leftPaddleY = constrain(pongGame.leftPaddleY, PongGame::PADDLE_HEIGHT/2, SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
       }
       break;
   }
 }
 
 void handleEncoder1Click() {
+  if (isAsleep) {
+    wakeUp();
+    previousState = SLEEP;
+    currentState = IDLE;
+  }
   switch (currentState) {
     case MUSIC:
       // Play/Pause
@@ -1130,18 +1254,20 @@ void handleEncoder1Click() {
       sendBLECommand(musicPlaying ? "MUSIC_PLAY" : "MUSIC_PAUSE");
       break;
     case NOTIFICATIONS:
-      // clear all notifications
+    case EVENTS:
+      previousState = currentState;
+      currentState = MENU;
       break;
     case TIMER:
-      if (timerState == TIMER_RUNNING || timerState == TIMER_PAUSED) {
-        // Pause/Resume
-        timerRunning = !timerRunning;
-        if (timerRunning) {
-          timerStartTime = millis();
-        } else {
-          timerElapsed += millis() - timerStartTime;
-        }
-        timerState = timerRunning ? TIMER_RUNNING : TIMER_PAUSED;
+      if (timerState == TIMER_RUNNING || timerState == TIMER_PAUSED) { // stop timer
+        timerRunning = false;
+        timerElapsed = 0;
+        timerState = TIMER_SELECT;
+      }
+      if (timerState == TIMER_SETUP) timerState = TIMER_SELECT; // go back to timer selection menu
+      if (timerState == TIMER_SELECT) {
+        previousState = currentState;
+        currentState = MENU;
       }
       break;
     case GAMES:
@@ -1169,18 +1295,6 @@ void handleEncoder1Click() {
 
 void handleEncoder1LongPress() {
   switch (currentState) {
-    case IDLE:
-      // change face type
-      break;
-    case MUSIC:
-      // change music layout
-      break;
-    case NOTIFICATIONS:
-      // change grid<->linear
-      break;
-    case EVENTS:
-      // change grid<->linear
-      break;
     case GAMES:
       // Exit to menu
       gameState = GAME_MENU;
@@ -1195,6 +1309,15 @@ int relativeMillis = 0;
 unsigned long lastSeek = millis();
 
 void updateSeek() {
+  unsigned long now = millis();
+
+  if (musicPlaying) {
+    playbackPosition += now - lastPlaybackUpdate;
+    if (playbackPosition > songDuration)
+      playbackPosition = songDuration;
+  }
+  lastPlaybackUpdate = now;
+
   if (relativeMillis != 0 && millis() - lastSeek >= seekTimer) {
     sendBLECommand("MUSIC_SEEK_RELATIVE:" + String(relativeMillis));
     relativeMillis = 0;
@@ -1210,13 +1333,14 @@ void handleEncoder2Rotation(int direction) {
         sendBLECommand("MUSIC_VOLUME:" + String(musicVolume));
       } else if (selectedMusicSubstate == SEEK) {
         // accumulate relative seek
-        playbackPosition += direction * seekDuration;
+        playbackPosition = constrain(playbackPosition + direction * seekDuration, 0, songDuration);
         relativeMillis += direction * seekDuration;
         lastSeek = millis(); // reset timer
       }
       break;
     case EVENTS:
-      // traverse current group items
+      if (numEvents == 0) return;
+      selectedEventIndex = (selectedEventIndex + direction + numEvents) % numEvents;
       break;
     case MENU:
       menuSelectionIndex -= direction;
@@ -1224,23 +1348,29 @@ void handleEncoder2Rotation(int direction) {
       if (menuSelectionIndex >= numFaces) menuSelectionIndex = 0;
       break;
     case TIMER:
+      if (timerState == TIMER_SELECT) selectedTimerType = (TimerType)constrain((int)selectedTimerType - direction, 0, 2);
+
       if (timerState == TIMER_SETUP) {
-        timerMinutes = constrain(timerMinutes + direction, 1, 120);
+        timerMinutesIndex = constrain(timerMinutesIndex - direction, 0, timerPresets - 1);
+        timerMinutes = timerMinutesPreset[timerMinutesIndex];
       }
       break;
     case GAMES:
       if (gameState == GAME_PLAYING && pongGame.gameActive && gameMode == 2) {
         // Move right paddle (only in 2-player mode)
         pongGame.rightPaddleY -= direction * PongGame::PADDLE_SPEED;
-        pongGame.rightPaddleY = constrain(pongGame.rightPaddleY, 
-                                         PongGame::PADDLE_HEIGHT/2, 
-                                         SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
+        pongGame.rightPaddleY = constrain(pongGame.rightPaddleY, PongGame::PADDLE_HEIGHT/2, SCREEN_HEIGHT - PongGame::PADDLE_HEIGHT/2);
       }
       break;
   }
 }
 
 void handleEncoder2Click() {
+  if (isAsleep) {
+    wakeUp();
+    previousState = SLEEP;
+    currentState = IDLE;
+  }
   switch (currentState) {
     case MUSIC:
       selectedMusicSubstate = selectedMusicSubstate == SEEK ? VOLUME : SEEK;
@@ -1253,13 +1383,38 @@ void handleEncoder2Click() {
       // clear selected notification
       break;
     case EVENTS:
-      // start selected event's timer
+    {
+      if (numEvents == 0) return;
+
+      // Start timer for this event
+      timerMinutes = eventDurations[selectedEventIndex];
+      timerDuration = timerMinutes * 60000UL;
+      timerElapsed = 0;
+      startTimer();
+      previousState = currentState;
+      currentState = TIMER;
+
+      // Notify phone app
+      String msg = "EVENT_COMPLETE:" + eventNames[selectedEventIndex];
+      sendBLECommand(msg.c_str());
+
+      // Remove the event from the list
+      for (int i = selectedEventIndex; i < numEvents - 1; i++) {
+        eventNames[i] = eventNames[i + 1];
+        eventDurations[i] = eventDurations[i + 1];
+      }
+      numEvents--;
+
+      // Keep selection valid
+      if (selectedEventIndex >= numEvents) {
+        selectedEventIndex = max(0, numEvents - 1);
+      }
       break;
+    }
     case TIMER:
       handleTimerClick();
       break;
     case GAMES:
-      // Same as encoder1 click for games
       handleEncoder1Click();
       break;
   }
@@ -1270,24 +1425,26 @@ void handleEncoder2LongPress() {
   if (currentState != MENU) {
     previousState = currentState;
     currentState = MENU;
-    menuSelectionIndex = 0;
   }
 }
 
 void handleTimerClick() {
   switch (timerState) {
+    case TIMER_RUNNING:
+    case TIMER_PAUSED:
+      timerRunning = !timerRunning;
+      if (timerRunning) {
+        timerStartTime = millis();
+      } else {
+        timerElapsed += millis() - timerStartTime;
+      }
+      timerState = timerRunning ? TIMER_RUNNING : TIMER_PAUSED;
+      break;
     case TIMER_SELECT:
       timerState = TIMER_SETUP;
       break;
     case TIMER_SETUP:
       startTimer();
-      break;
-    case TIMER_RUNNING:
-    case TIMER_PAUSED:
-      // Reset timer
-      timerRunning = false;
-      timerElapsed = 0;
-      timerState = TIMER_SELECT;
       break;
     case TIMER_FINISHED:
       timerState = TIMER_SELECT;
@@ -1313,34 +1470,33 @@ void updateTimer() {
   unsigned long currentTime = millis();
   unsigned long totalElapsed = timerElapsed + (currentTime - timerStartTime);
 
-  if (selectedTimerType == STOPWATCH) {
-    // Stopwatch runs indefinitely
-    return;
-  }
+  if (selectedTimerType == STOPWATCH) return; // Stopwatch runs indefinitely
 
   // Countdown timer
   if (totalElapsed >= timerDuration) {
     timerRunning = false;
     timerState = TIMER_FINISHED;
 
-    if (selectedTimerType == POMODORO) {
+    if (selectedTimerType == POMODORO)
       handlePomodoroComplete();
-    }
   }
 }
 
 void handlePomodoroComplete() {
-  if (pomodoroSession % 4 == 0) {
-    // Long break after 4 sessions
-    timerMinutes = 15;
+  if (!pomodoroOnBreak) {
+    // Finished a work session → go into break
+    pomodoroSession++;
+    pomodoroOnBreak = true;
+    if (pomodoroSession % 4 == 0) timerMinutes = 15; // long break after 4 sessions
+    else timerMinutes = 5; // short break
   } else {
-    // Short break
-    timerMinutes = 5;
+    // Finished a break → go back to work
+    timerMinutes = 25;    // default work session
+    pomodoroOnBreak = false;
   }
-  pomodoroSession++;
 
-  // Auto-start break timer
-  delay(2000);  // Show "FINISHED!" for 2 seconds
+  // Auto-start next timer
+  delay(2000); // Show "FINISHED!" screen for 2s
   startTimer();
 }
 
@@ -1400,6 +1556,34 @@ void addNotification(String app, String title, String content) {
 
     // Notification feedback
     playTone(800, 200);
+  }
+}
+
+void parseEvents(String data) {
+  numEvents = 0;
+  selectedEventIndex = 0;
+
+  // Strip prefix
+  data.remove(0, 7); // remove "EVENTS:"
+
+  int start = 0;
+  while (numEvents < MAX_EVENTS) {
+    int sep = data.indexOf('|', start);
+    String token = (sep == -1) ? data.substring(start) : data.substring(start, sep);
+    if (token.length() == 0) break;
+
+    int parenOpen = token.indexOf('(');
+    int parenClose = token.indexOf(')');
+    if (parenOpen != -1 && parenClose != -1) {
+      eventNames[numEvents] = token.substring(0, parenOpen);
+      String durationStr = token.substring(parenOpen + 1, parenClose);
+      durationStr.replace("m", "");
+      eventDurations[numEvents] = durationStr.toInt();
+      numEvents++;
+    }
+
+    if (sep == -1) break;
+    start = sep + 1;
   }
 }
 
@@ -1469,13 +1653,21 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
     }
 
     if (data.startsWith("TIME:")) {
-      // Handle time sync if needed
       // Format: TIME:HH:MM:SS
+      int hh = data.substring(5, 7).toInt();
+      int mm = data.substring(8, 10).toInt();
+      int ss = data.substring(11, 13).toInt();
+
+      currentHour = hh;
+      currentMinute = mm;
+      currentSecond = ss;
+
+      lastTimeSync = millis();
+      lastTick = millis();
     }
     
     if (data.startsWith("EVENTS:")) {
-      // Handle events/todos
-      // Format: EVENTS:event1|event2|event3...
+      parseEvents(data);
     }
   }
 } rxCallbacks;

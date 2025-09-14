@@ -79,47 +79,6 @@ class MusicControls extends StatelessWidget {
                 ),
               ),
 
-              // Progress Bar (placeholder - Spotify SDK doesn't always provide progress)
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 32),
-                child: Column(
-                  children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape: RoundSliderThumbShape(
-                          enabledThumbRadius: 8,
-                        ),
-                      ),
-                      child: Slider(
-                        value: 0.3, // Placeholder value
-                        onChanged: (value) {
-                          // TODO: Implement seek functionality
-                        },
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            "1:23",
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                          Text(
-                            "3:45",
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              SizedBox(height: 20),
-
               // Control Buttons
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: 32),
