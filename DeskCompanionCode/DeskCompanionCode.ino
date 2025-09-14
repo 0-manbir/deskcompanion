@@ -96,7 +96,7 @@ const unsigned long debounceDelay = 200;     // debounce time (ms)
 #define PIR_PIN 35
 bool userPresent = false;
 unsigned long lastMotionTime = 0;
-const unsigned long SLEEP_DELAY = 1000;  // 1 seconds
+const unsigned long SLEEP_DELAY = 20000;  // 20 seconds
 bool isAsleep = false;
 
 // === Sensors ===
@@ -313,8 +313,38 @@ public:
 
   void happy() {
     reset();
-    display_fillTriangle(left.x - left.w / 2, left.y, left.x + left.w / 2, left.y, left.x, left.y + left.h / 2, COLOR_BLACK);
-    display_fillTriangle(right.x - right.w / 2, right.y, right.x + right.w / 2, right.y, right.x, right.y + right.h / 2, COLOR_BLACK);
+
+    int eyeW = defaultW * 0.7;   // narrower eyes
+    int eyeH = defaultH * 0.6;   // shorter eyes
+    int radius = eyeW / 2;
+
+    int eyeY = SCREEN_HEIGHT / 2 - eyeH / 2;
+    int leftX = SCREEN_WIDTH / 2 - eyeW - spacing / 2;
+    int rightX = SCREEN_WIDTH / 2 + spacing / 2;
+
+    // --- Eyes with rounded top (fake half-circle using drawDisc) ---
+    // Left
+    display_fillRoundRect(leftX, eyeY + eyeH / 3, eyeW, eyeH * 2 / 3, 0, 1);
+    u8g2.setDrawColor(1);
+    u8g2.drawDisc(leftX + eyeW / 2, eyeY + eyeH / 3, radius);
+    // Mask bottom half (erase it)
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(leftX, eyeY + eyeH / 3, eyeW, eyeH * 2 / 3);
+    u8g2.setDrawColor(1);
+
+    // Right
+    display_fillRoundRect(rightX, eyeY + eyeH / 3, eyeW, eyeH * 2 / 3, 0, 1);
+    u8g2.drawDisc(rightX + eyeW / 2, eyeY + eyeH / 3, radius);
+    u8g2.setDrawColor(0);
+    u8g2.drawBox(rightX, eyeY + eyeH / 3, eyeW, eyeH * 2 / 3);
+    u8g2.setDrawColor(1);
+
+    // --- Smile arc ---
+    int smileX = SCREEN_WIDTH / 2;
+    int smileY = SCREEN_HEIGHT / 2 + eyeH;
+    int smileR = 12;
+    u8g2.drawArc(smileX, smileY, smileR, 200, 340); // valid call: x,y,r,start,end
+
     display_display();
   }
 
@@ -349,7 +379,28 @@ private:
   }
 };
 
-EyeManager eyes(44, 44, 12, 10); // width, height, spacing, corner
+EyeManager eyes(46, 46, 12, 10); // width, height, spacing, corner
+
+// Threshold for detecting pickup movement
+float pickupThreshold = 1.2;
+
+void checkPickup() {
+  sensors_event_t event;
+  adxl.getEvent(&event);
+
+  // Calculate magnitude of acceleration vector (ignoring gravity offset ~9.8)
+  float ax = event.acceleration.x / 9.8;
+  float ay = event.acceleration.y / 9.8;
+  float az = event.acceleration.z / 9.8;
+
+  float magnitude = sqrt(ax * ax + ay * ay + az * az);
+
+  if (magnitude > pickupThreshold) {
+    eyes.happy();
+    delay(1500);
+    eyes.reset();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -396,6 +447,7 @@ void loop() {
   handleState();
 
   if (currentState != SLEEP) {
+    // checkPickup();
     readSensors();
     handleSleepMode();
     handleOverlays();
@@ -466,8 +518,8 @@ void readSensors() {
     sensors_event_t event;
     adxl.getEvent(&event);
 
-    tiltX = -event.acceleration.y / 9.8;   // forward/back (Y is downward arrow → invert for chest mount)
-    tiltY =  event.acceleration.x / 9.8;   // left/right tilt (X arrow is left)
+    tiltX = event.acceleration.x / 9.8;   // forward/back (Y is downward arrow → invert for chest mount)
+    tiltY = event.acceleration.z / 9.8;   // left/right tilt (X arrow is left)
 
     lastAccelRead = millis();
   }
@@ -1372,6 +1424,11 @@ void handleEncoder2Click() {
     currentState = IDLE;
   }
   switch (currentState) {
+    case IDLE:
+      eyes.happy();
+      delay(2000);
+      eyes.reset();
+      break;
     case MUSIC:
       selectedMusicSubstate = selectedMusicSubstate == SEEK ? VOLUME : SEEK;
       break;
